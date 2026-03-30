@@ -5,10 +5,6 @@
 ![Python](https://img.shields.io/badge/Python-3.11-ffb6c1?style=flat-square)
 ![pygame](https://img.shields.io/badge/pygame-2.6-c9b1ff?style=flat-square)
 
-![main screen](animation.gif)
-
----
-
 ## what is waddle ˘ᵕ˘
 
 Waddle is a tiny desktop virtual pet with a Y2K kawaii aesthetic. keep your little penguin happy, play mini-games to earn fish, and dress her up from the boutique wardrobe ♡
@@ -17,19 +13,23 @@ Waddle is a tiny desktop virtual pet with a Y2K kawaii aesthetic. keep your litt
 
 ## screens
 
-| | |
-|--|--|
-| ![idle](animation.gif) | ![chill](weather.gif) |
-| **idle** — feed, rest, watch her mood change | **chill** — live weather, lofi vibes, affirmations |
+<table>
+<tr>
+<td align="center"><img src="animation.gif" width="380"/><br/><b>idle</b> — feed, rest, watch her mood change</td>
+<td align="center"><img src="weather.gif" width="380"/><br/><b>chill</b> — live weather, lofi vibes, affirmations</td>
+</tr>
+</table>
 
 ---
 
 ## games
 
-| | |
-|--|--|
-| ![dodge](Dodge.gif) | ![code](code.gif) |
-| **dodge.exe** — dodge falling folder debris, catch fish | **code.exe** — simon says pattern, streak for bonus fish |
+<table>
+<tr>
+<td align="center"><img src="Dodge.gif" width="380"/><br/><b>dodge.exe</b> — dodge falling folder debris, catch fish</td>
+<td align="center"><img src="code.gif" width="380"/><br/><b>code.exe</b> — simon says pattern, streak for bonus fish</td>
+</tr>
+</table>
 
 ---
 
