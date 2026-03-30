@@ -17,9 +17,10 @@ Waddle is a tiny desktop virtual pet with a Y2K kawaii aesthetic. keep your litt
 
 ## screens
 
-![chill](weather.gif)
-
-*chill — live weather, lofi vibes, affirmations*
+| | |
+|--|--|
+| ![idle](Animation.gif) | ![chill](weather.gif) |
+| **idle** — feed, rest, watch her mood change | **chill** — live weather, lofi vibes, affirmations |
 
 ---
 
@@ -89,8 +90,6 @@ Waddle's mood changes based on her hunger, happiness, and energy levels:
 ---
 
 ## customization
-
-Background photos (`vibe.png`, `chill.jpg`) are included in the download — no extra setup needed ♡
 
 Want a custom shelf figurine in the code room? Drop any small image next to `waddle.py` and name it `figurine.png`. Falls back to a drawn star if absent.
 
