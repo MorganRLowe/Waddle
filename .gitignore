@@ -1,0 +1,27 @@
+# user save data
+waddle_save.json
+
+# python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# old renamed asset files (replaced by vibe.png and chill.jpg)
+vibe.webp
+360_F_438917562_2XqNvCwbNA8VlGpMZPAb6Ennr38o0Rxs.jpg
+
+# leftover junk files
+a9b8cf03aafc0ed58b542e03d281dd2f.jpg
+download.jpg
+dresses.png
+error.jpg
+images.jpg
+wp10524295.jpg
+weather example.jpg
+
+# optional custom figurine (user's own image)
+figurine.png
+
+# os noise
+Thumbs.db
+.DS_Store
