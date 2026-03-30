@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11-ffb6c1?style=flat-square)
 ![pygame](https://img.shields.io/badge/pygame-2.6-c9b1ff?style=flat-square)
 
-![main screen](Animation.gif)
+![main screen](animation.gif)
 
 ---
 
@@ -19,7 +19,7 @@ Waddle is a tiny desktop virtual pet with a Y2K kawaii aesthetic. keep your litt
 
 | | |
 |--|--|
-| ![idle](Animation.gif) | ![chill](weather.gif) |
+| ![idle](animation.gif) | ![chill](weather.gif) |
 | **idle** — feed, rest, watch her mood change | **chill** — live weather, lofi vibes, affirmations |
 
 ---
