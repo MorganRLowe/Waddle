@@ -253,6 +253,10 @@ class Sounds:
     def dream_lose(cls):
         cls._play('dlose', lambda: _make_tone(294, 0.30, 0.18, 'tri'))
 
+    @classmethod
+    def virus_alert(cls):
+        cls._play('virus', lambda: _make_tone(140, 0.45, 0.24, 'square'))
+
 # ── PIXEL PALETTE — Waddle sprite colours ────────────────────────────────────
 # W_BD = body dark blue  W_BM = body mid   W_BH = body highlight
 # W_WH = belly white     W_PK = blush pink W_OR = beak/feet orange
@@ -507,7 +511,7 @@ def draw_desk(surf, cx, dy, frame, state):
     for i in range(8):
         stx = mr_x+6 + (i*13)%68; sty = mr_y+4 + (i*7)%16
         fv = 0.5+0.5*math.sin(frame*0.09+i)
-        pygame.draw.rect(surf,(255,240,200),(stx,sty,2,2))
+        pygame.draw.rect(surf,(220,200,255),(stx,sty,2,2))
     # Moon on screen
     pygame.draw.circle(surf,(255,245,170),(mr_x+mr_w-14, mr_y+10),6)
     pygame.draw.circle(surf,(80,50,130),(mr_x+mr_w-11, mr_y+8),5)   # crescent shadow
@@ -838,25 +842,68 @@ class DodgeGame:
         self.fish_earned=0
         self.level=1            # displayed level
         self.near_miss_t=0      # flash when debris just misses
+        self.levelup_t=0; self.levelup_n=1  # level-up announcement
+        self.lives=3; self.invincible_t=0; self.hit_flash_t=0
         # Pre-built CRT scanline overlay — built once, blitted every frame
         self._crt = pygame.Surface((SW, SH), pygame.SRCALPHA)
         for _y in range(0, SH, 2):
             pygame.draw.line(self._crt, (0,0,0,16), (0,_y),(SW,_y))
+        # Virus.exe mechanic
+        self.virus_active  = False
+        self.virus_t       = 0        # ms elapsed in current virus phase
+        self.virus_trigger = 50       # score that trips the next virus
+        self.virus_files   = []       # big slow virus file objects {x,y}
+        self.virus_flash   = 0        # ms of red flash on trigger
+        # Drifting starfield
+        _rng = random.Random(7)
+        self.stars = [{'x': float(_rng.randint(0,SW)), 'y': float(_rng.randint(0,SH)),
+                       'spd': _rng.uniform(0.25,0.8), 'bright': _rng.randint(70,190)}
+                      for _ in range(38)]
 
     def update(self,dt,keys):
         if not self.alive: return
         self.frame+=1
         if self.near_miss_t>0: self.near_miss_t-=dt
 
+        # Virus.exe phase trigger & tick
+        VIRUS_DUR = 8000
+        if not self.virus_active and self.pts >= self.virus_trigger:
+            self.virus_active = True
+            self.virus_t      = 0
+            self.virus_flash  = 500
+            self.virus_trigger += random.randint(80, 140)
+            self.virus_files  = [
+                {'x': float(random.randint(70, SW-70)), 'y': -80.0},
+                {'x': float(random.randint(70, SW-70)), 'y': -180.0},
+            ]
+            Sounds.virus_alert()
+        if self.virus_active:
+            self.virus_t += dt
+            if self.virus_t >= VIRUS_DUR:
+                self.virus_active = False
+                self.virus_t      = 0
+                self.virus_files.clear()
+        if self.virus_flash > 0: self.virus_flash -= dt
+
+        # Drift starfield
+        for s in self.stars:
+            s['y'] = (s['y'] + s['spd']) % SH
+
         # Speed ramp every 50 pts
         self.speed=2.2+min(3.0,(self.pts//50)*0.35)
-        self.level=1+(self.pts//50)
+        _nl=1+(self.pts//50)
+        if _nl>self.level: self.levelup_t=1400; self.levelup_n=_nl
+        self.level=_nl
+        if self.levelup_t>0:    self.levelup_t-=dt
+        if self.invincible_t>0: self.invincible_t-=dt
+        if self.hit_flash_t>0:  self.hit_flash_t-=dt
 
         mv=5
         if keys[pygame.K_LEFT]:  self.px=max(22,self.px-mv)
         if keys[pygame.K_RIGHT]: self.px=min(SW-22,self.px+mv)
         self.dt_d+=dt
-        if self.dt_d>max(560,1380-self.pts*8):
+        _d_interval = max(380,1380-self.pts*8) if self.virus_active else max(560,1380-self.pts*8)
+        if self.dt_d>_d_interval:
             self.dt_d=0
             self.debris.append({'x':random.randint(self.FW//2+14,SW-self.FW//2-14),
                                  'y':-self.FH,'col':random.choice(self.FCOLS)})
@@ -884,13 +931,20 @@ class DodgeGame:
         for d in self.debris:
             db_top = d['y'] - self.FH//2
             db_bot = d['y'] + self.FH//2
-            if (db_bot > head_top and db_top < head_bottom          # vertical: overlaps head band
-                    and abs(d['x']-self.px) < head_hw + self.FW//2):   # horizontal: overlaps head width
-                self.alive=False; self.combo=0
-                self.w.happiness=max(0,  self.w.happiness-15)
-                self.w.energy   =max(0,  self.w.energy   -8)
-                self.w.points+=self.fish_earned; self.w.save(); return
-            # Near-miss: same vertical zone, just wider horizontally
+            if (db_bot > head_top and db_top < head_bottom
+                    and abs(d['x']-self.px) < head_hw + self.FW//2):
+                if self.invincible_t <= 0:
+                    self.combo=0; self.lives-=1; self.hit_flash_t=400
+                    if self.lives<=0:
+                        self.alive=False
+                        self.w.happiness=max(0,  self.w.happiness-15)
+                        self.w.energy   =max(0,  self.w.energy   -8)
+                        self.w.points+=self.fish_earned; self.w.save(); return
+                    else:
+                        self.invincible_t=2000
+                        self.w.happiness=max(0,self.w.happiness-5)
+                        self.debris=[dd for dd in self.debris if dd['y']<head_top-40]
+                        break
             elif (db_bot > head_top and db_top < head_bottom
                     and abs(d['x']-self.px) < head_hw + self.FW//2 + 18):
                 self.near_miss_t=max(self.near_miss_t,380)
@@ -910,10 +964,32 @@ class DodgeGame:
                     self.catch_flashes.append({
                         'x':float(f['x']),'y':float(f['y']),
                         'vx':math.cos(ang)*spd,'vy':math.sin(ang)*spd,
-                        'life':1.0,'col':random.choice([(255,230,100),(100,235,255),(255,160,220)])
+                        'life':1.0,'col':random.choice([(255,180,220),(180,140,255),(255,160,220)])
                     })
                 self.w.hunger   =max(0,   self.w.hunger   -10)
                 self.w.happiness=min(100, self.w.happiness+5)
+
+        # Virus file movement + collision
+        VFW, VFH = 72, 58
+        for vf in self.virus_files:
+            vf['y'] += max(1.0, self.speed * 0.55)
+        self.virus_files = [vf for vf in self.virus_files if vf['y'] < SH+90]
+        for vf in self.virus_files:
+            vfb_top = vf['y'] - VFH//2
+            vfb_bot = vf['y'] + VFH//2
+            if (vfb_bot > head_top and vfb_top < head_bottom
+                    and abs(vf['x']-self.px) < head_hw + VFW//2):
+                if self.invincible_t <= 0:
+                    self.combo=0; self.lives-=1; self.hit_flash_t=400
+                    if self.lives<=0:
+                        self.alive=False
+                        self.w.happiness=max(0,  self.w.happiness-15)
+                        self.w.energy   =max(0,  self.w.energy   -8)
+                        self.w.points  +=self.fish_earned; self.w.save(); return
+                    else:
+                        self.invincible_t=2000
+                        self.w.happiness=max(0,self.w.happiness-5)
+                        break
 
         # Move catch flash particles
         for cf in self.catch_flashes:
@@ -1034,6 +1110,58 @@ class DodgeGame:
         lbl=F11.render("+5",False,WHI)
         surf.blit(lbl,(x-lbl.get_width()//2,y-30))
 
+    def _virus_file(self,surf,x,y):
+        """Big corrupted VIRUS.EXE obstacle — 72×58, red palette, skull face."""
+        x,y=int(x),int(y)
+        FW,FH=72,58
+        col=(200,30,55)
+        bx=x-FW//2; by=y-FH//2
+        light=clamp_color(col[0]+55,col[1]+55,col[2]+55)
+        pale =clamp_color(col[0]+85,col[1]+85,col[2]+85)
+        # Drop shadow
+        sh=pygame.Surface((FW+6,FH+6),pygame.SRCALPHA)
+        pygame.draw.rect(sh,(0,0,0,75),(0,0,FW+6,FH+6),border_radius=8)
+        surf.blit(sh,(bx+3,by+4))
+        # Body
+        pygame.draw.rect(surf,col,(bx,by,FW,FH),border_radius=6)
+        # Inner gradient
+        for i in range(FH//2):
+            al=int(50*(1-i/(FH//2)))
+            pygame.draw.line(surf,(*light,al),(bx+3,by+i),(bx+FW-4,by+i))
+        # Tab
+        tw=FW//3+4; th=12
+        pygame.draw.rect(surf,col,(bx,by-th,tw,th+4),border_radius=3)
+        pygame.draw.rect(surf,(*light,80),(bx+1,by-th+1,tw-2,5))
+        # Glitch lines
+        for gi in range(4):
+            gy=by+8+gi*11
+            gl_col=clamp_color(col[0]+40,col[1]+40,col[2]+40)
+            pygame.draw.line(surf,(*gl_col,100),(bx+4,gy),(bx+FW-5,gy))
+            pygame.draw.line(surf,col,(bx+8+gi*6,gy),(bx+16+gi*6,gy))
+        # Glass sheen
+        sheen=pygame.Surface((FW-4,FH//3),pygame.SRCALPHA)
+        pygame.draw.rect(sheen,(255,255,255,22),(0,0,FW-4,FH//3),border_radius=4)
+        surf.blit(sheen,(bx+2,by+2))
+        # Border
+        pygame.draw.rect(surf,light,(bx,by,FW,FH),2,border_radius=6)
+        # Skull: X eyes
+        ey=by+FH*2//5
+        for xc in (x-12,x+12):
+            pygame.draw.line(surf,(255,170,190),(xc-5,ey-5),(xc+5,ey+5),2)
+            pygame.draw.line(surf,(255,170,190),(xc+5,ey-5),(xc-5,ey+5),2)
+        # Skull: teeth row
+        for tx in range(x-11,x+13,6):
+            pygame.draw.rect(surf,(255,170,190),(tx,ey+9,4,7))
+        pygame.draw.line(surf,col,(x-10,ey+12),(x+12,ey+12),1)
+        # Label
+        lbl=F8.render("VIRUS.EXE",False,pale)
+        surf.blit(lbl,(x-lbl.get_width()//2,by+4))
+        # Pulsing glow ring
+        pulse_a=int(abs(math.sin(pygame.time.get_ticks()/300))*55)+15
+        glow=pygame.Surface((FW+22,FH+22),pygame.SRCALPHA)
+        pygame.draw.rect(glow,(*col,pulse_a),(0,0,FW+22,FH+22),5,border_radius=11)
+        surf.blit(glow,(bx-11,by-11))
+
     def draw(self,surf):
         # Hot-pink grid pattern
         for y in range(SH):
@@ -1041,6 +1169,14 @@ class DodgeGame:
             r = clamp_color(int(240-t*30), int(160-t*50), int(225-t*40))
             pygame.draw.line(surf, r, (0,y), (SW,y))
         grid_bg(surf,(230,60,180),22,32)
+
+        # Drifting starfield
+        for s in self.stars:
+            _sc=pygame.Surface((5,5),pygame.SRCALPHA)
+            pygame.draw.circle(_sc,(235,220,255,s['bright']),(2,2),1)
+            if s['bright']>150:
+                pygame.draw.circle(_sc,(255,245,255,s['bright']//4),(2,2),2)
+            surf.blit(_sc,(int(s['x'])-2,int(s['y'])-2))
 
         # Near-miss edge flash
         if self.near_miss_t>0:
@@ -1055,6 +1191,22 @@ class DodgeGame:
             _draw_cross_star(surf,d['col'],d['x'],int(d['y']-self.FH//2),2,38)
         for f in self.fish:   self._fish(surf,f['x'],f['y'])
 
+        # Virus files
+        for vf in self.virus_files:
+            self._virus_file(surf,vf['x'],vf['y'])
+
+        # Virus vignette + start flash
+        if self.virus_active:
+            _pa=int(abs(math.sin(self.virus_t/350))*35)+10
+            _vv=pygame.Surface((SW,SH),pygame.SRCALPHA)
+            pygame.draw.rect(_vv,(220,20,50,_pa),(0,0,SW,SH),14)
+            surf.blit(_vv,(0,0))
+        if self.virus_flash>0:
+            _fa=int((self.virus_flash/500)*100)
+            _fl=pygame.Surface((SW,SH),pygame.SRCALPHA)
+            _fl.fill((220,20,50,_fa))
+            surf.blit(_fl,(0,0))
+
         # CRT scanline overlay
         surf.blit(self._crt,(0,0))
 
@@ -1064,35 +1216,74 @@ class DodgeGame:
             sz=max(2,int(cf['life']*6))
             _draw_cross_star(surf,cf['col'],int(cf['x']),int(cf['y']),sz,a)
 
-        # Waddle sprite + accessories
+        # Hit flash
+        if self.hit_flash_t>0:
+            _hfa=int((self.hit_flash_t/400)*160)
+            _hf=pygame.Surface((SW,SH),pygame.SRCALPHA)
+            _hf.fill((255,255,255,_hfa))
+            surf.blit(_hf,(0,0))
+
+        # Waddle sprite + accessories (flicker during invincibility)
+        _draw_spr = not (self.invincible_t>0 and (self.frame//4)%2==0)
         ws=get_spr('happy' if self.alive else 'sad',self.SPX)
         wx=int(self.px-ws.get_width()//2)
         wy=int(self.PY-ws.get_height()+8*self.SPX)
-        surf.blit(ws,(wx,wy))
-        for eid in self.w.equipped:
-            it=next((x for x in ITEMS if x['id']==eid),None)
-            if it: draw_accessory(surf,eid,it['col'],wx,wy,self.SPX)
+        if _draw_spr:
+            surf.blit(ws,(wx,wy))
+            for eid in self.w.equipped:
+                it=next((x for x in ITEMS if x['id']==eid),None)
+                if it: draw_accessory(surf,eid,it['col'],wx,wy,self.SPX)
+
+        # Level-up announcement
+        if self.levelup_t>0:
+            la=min(255,int(self.levelup_t/5.5))
+            _lv=pygame.Surface((SW,56))
+            _lv.fill((0,0,0)); _lv.set_colorkey((0,0,0)); _lv.set_alpha(la)
+            blit_c(_lv,F24,f"LEVEL {self.levelup_n}",(255,80,180),SW//2,4)
+            blit_c(_lv,F8,"♡  keep going  ♡",(220,160,255),SW//2,34)
+            surf.blit(_lv,(0,SH//2-28))
 
         # ── HUD ── single centred POINTS panel ──
         hud_w=168
         hx=SW//2-hud_w//2
-        cy=draw_win(surf,hx,8,hud_w,72,"DODGE.EXE")
-        blit_c(surf,F8,"POINTS",(80,45,155),SW//2,cy+2)
+        cy=draw_win(surf,hx,8,hud_w,106,"DODGE.EXE")
+        blit_c(surf,F8,f"POINTS  LVL {self.level}",(80,45,155),SW//2,cy+2)
         blit_c(surf,F18,f"{self.pts:04d}",(45,18,100),SW//2,cy+14)
-        if self.combo>=5:
-            cc=(255,220,60)
-            blit_c(surf,F8,f"★ x2 FISH STREAK!",cc,SW//2,cy+30)
+        for _li in range(3):
+            _hc=(255,80,155) if _li<self.lives else (55,20,75)
+            _draw_pixel_heart(surf,_hc,SW//2-22+_li*22,cy+36,px=2,alpha=220)
+        if self.virus_active:
+            prog=min(1.0,self.virus_t/8000)
+            _bw=130; _bx2=SW//2-_bw//2
+            _vc=(255,80,110) if (self.frame//8)%2==0 else (190,40,75)
+            blit_c(surf,F8,"VIRUS.EXE CLEANING",_vc,SW//2,cy+50)
+            pygame.draw.rect(surf,(55,18,75),(_bx2,cy+62,_bw,8),border_radius=3)
+            _fw=int(_bw*prog)
+            if _fw>0:
+                pygame.draw.rect(surf,(255,50,100),(_bx2,cy+62,_fw,8),border_radius=3)
+        elif self.combo>=5:
+            cc=(255,180,220)
+            blit_c(surf,F8,f"★ x2 FISH STREAK!",cc,SW//2,cy+50)
         elif self.combo>1:
-            cc=clamp_color(255,max(100,255-self.combo*15),50)
-            blit_c(surf,F8,f"x{self.combo} streak",cc,SW//2,cy+30)
+            cc=clamp_color(255,max(80,160-self.combo*8),min(255,180+self.combo*5))
+            blit_c(surf,F8,f"x{self.combo} streak",cc,SW//2,cy+50)
 
         if not self.alive:
             ov=pygame.Surface((SW,SH),pygame.SRCALPHA)
-            ov.fill((6,2,16,208)); surf.blit(ov,(0,0))
-            cy3=draw_win(surf,SW//2-120,SH//2-60,240,120,"GAME OVER")
+            ov.fill((6,2,16,210)); surf.blit(ov,(0,0))
+            # Glitch lines
+            for _gl in range(5):
+                _gy=random.randint(0,SH)
+                _gs=pygame.Surface((SW,2),pygame.SRCALPHA)
+                _gs.fill((200,40,100,38))
+                surf.blit(_gs,(random.randint(-8,8),_gy))
+            cy3=draw_win(surf,SW//2-130,SH//2-70,260,140,"SYSTEM CRASH")
             blit_c(surf,F32,"GAME OVER",(255,75,155),SW//2,cy3+4)
-            blit_c(surf,F8,"fish earned",(160,110,220),SW//2,cy3+48)
+            blit_c(surf,F8,"──────────────────",(100,50,140),SW//2,cy3+36)
+            blit_c(surf,F8,"fish earned",(160,110,220),SW//2,cy3+50)
             blit_c(surf,F24,f"{self.fish_earned}",(255,75,155),SW//2,cy3+64)
+            if (self.frame//14)%2==0:
+                blit_c(surf,F8,"press ESC to exit",(120,60,160),SW//2,cy3+100)
 
 
 def _draw_cross_star(surf, col, x, y, size, alpha=255):
@@ -1382,7 +1573,7 @@ class DreamGame:
             lx,ly=rope_pts[li]
             wire_len=7+int(math.sin(li*0.9)*3)
             pygame.draw.line(surf,(60,38,88),(lx,ly),(lx,ly+wire_len),1)
-            lc=[(255,140,220),(195,120,255),(120,185,255),(255,215,90),(170,255,195),(255,95,195)][li%6]
+            lc=[(255,140,220),(195,120,255),(120,185,255),(255,120,210),(170,200,255),(255,95,195)][li%6]
             fv=max(0.0,0.48+0.52*math.sin(self.frame*0.07+li*0.65))
             for gr in range(13,0,-2):
                 ga=max(0,int(58*fv*(gr/13)))
@@ -2220,9 +2411,9 @@ class Chill:
         else:
             for y in range(SH):
                 t=y/SH
-                r=int(28 +t*62);  g=int(18 +t*48);  b=int(72+t*88)
+                r=int(48+t*40);  g=int(12+t*16);  b=int(78+t*50)
                 pygame.draw.line(surf,clamp_color(r,g,b),(0,y),(SW,y))
-        grid_bg(surf,(160,100,220),20,18)
+        grid_bg(surf,(220,80,180),20,18)
 
     def _stars(self,surf):
         for i in range(30):
@@ -2232,9 +2423,9 @@ class Chill:
             if i%3==0:
                 _draw_cross_star(surf,(200,175,255),sx,sy,max(1,int(1+fv)),a)
             else:
-                cr=min(255,max(0,int(120+fv*100)))
-                cg=min(255,max(0,int(90+fv*80)))
-                cb=255
+                cr=min(255,max(0,int(200+fv*55)))
+                cg=min(255,max(0,int(110+fv*60)))
+                cb=min(255,max(0,int(220+fv*35)))
                 s2=pygame.Surface((4,4),pygame.SRCALPHA)
                 pygame.draw.rect(s2,(cr,cg,cb,a),(1,0,2,4))
                 pygame.draw.rect(s2,(cr,cg,cb,a),(0,1,4,2))
@@ -2251,8 +2442,7 @@ class Chill:
                 if a<8: continue
                 sz=max(1,int((1.0-tj)*2.5))
                 s2=pygame.Surface((sz*2+2,sz*2+2),pygame.SRCALPHA)
-                cr=min(255,int(210+tj*45))
-                pygame.draw.circle(s2,(cr,235,255,a),(sz+1,sz+1),sz)
+                pygame.draw.circle(s2,(255,min(255,int(160+tj*70)),min(255,int(200+tj*40)),a),(sz+1,sz+1),sz)
                 surf.blit(s2,(tx2-sz,ty2-sz))
 
     def _bg_clouds(self,surf):
@@ -2452,7 +2642,7 @@ class PetScreen:
         if mood=='happy' and self.frame%10==0:
             ox,oy=self._spr_pos()
             cx,cy=ox+26*PX//2,oy+14*PX
-            cols=[(255,178,218),(198,158,255),(162,218,255),(255,230,120)]
+            cols=[(255,178,218),(198,158,255),(210,185,255),(255,175,215)]
             n = 2 if mood=='excited' else 1
             for _ in range(n):
                 self.sparks.append({'x':cx+random.randint(-80,80),
@@ -2635,7 +2825,7 @@ class PetScreen:
 
         # Star decorations on bubble — mood-dependent
         if mood in ('happy','excited'):
-            star_c=(255,230,100)
+            star_c=(255,180,220)
             _draw_cross_star(surf,star_c,bx+8,by+6,1,180)
             _draw_cross_star(surf,star_c,bx+tw-9,by+7,1,150)
 
