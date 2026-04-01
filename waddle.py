@@ -1322,19 +1322,11 @@ class DodgeGame:
 
         if not self.alive:
             ov=pygame.Surface((SW,SH),pygame.SRCALPHA)
-            ov.fill((6,2,16,210)); surf.blit(ov,(0,0))
-            # Glitch lines
-            for _gl in range(5):
-                _gy=random.randint(0,SH)
-                _gs=pygame.Surface((SW,2),pygame.SRCALPHA)
-                _gs.fill((200,40,100,38))
-                surf.blit(_gs,(random.randint(-8,8),_gy))
+            ov.fill((20,5,10,210)); surf.blit(ov,(0,0))
             cy3=draw_win(surf,SW//2-130,SH//2-70,260,140,"GAME OVER")
-            blit_c(surf,F32,"GAME OVER",(255,75,155),SW//2,cy3+4)
-            blit_c(surf,F8,"fish earned",(160,110,220),SW//2,cy3+48)
-            blit_c(surf,F32,f"{self.fish_earned}",(255,75,155),SW//2,cy3+64)
-            if (self.frame//14)%2==0:
-                blit_c(surf,F8,"press ESC to exit",(120,60,160),SW//2,cy3+100)
+            blit_c(surf,F32,"GAME OVER",(255,60,100),SW//2,cy3+4)
+            blit_c(surf,F14,"fish earned",(160,110,220),SW//2,cy3+48)
+            blit_c(surf,F32,f"{self.fish_earned}",(255,75,155),SW//2,cy3+68)
 
 
 def _draw_cross_star(surf, col, x, y, size, alpha=255):
