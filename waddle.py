@@ -13,7 +13,7 @@ Optional background images (place next to waddle.py, any format pygame supports)
 """
 
 import pygame, math, random, sys, json, os
-import urllib.request, threading, datetime
+import urllib.request, urllib.parse, threading, datetime
 import numpy as np
 pygame.mixer.pre_init(44100, -16, 1, 512)
 pygame.init()
@@ -45,6 +45,7 @@ def _load_img(name, size=(SW, SH)):
 IMG_HOLO   = _load_img("chill.jpg")
 IMG_KAWAII = _load_img("wp9285390.png")
 IMG_VIBE   = _load_img("vibe.png")
+IMG_BOOT   = _load_img("loading_screen.png")
 
 def _load_img_native(path):
     """Load an image at its native resolution (no rescale), with alpha."""
@@ -263,7 +264,7 @@ class Sounds:
 # W_OD = beak dark       W_EY = eye dark   W_SH = eye shine
 # W_TR = transparent (None → skipped when drawing)
 W_BD=(126,200,227); W_BM=(86,164,196); W_BH=(186,232,250)
-W_WH=(255,240,252); W_PK=(255,176,214); W_OR=(255,200,96)
+W_WH=(255,240,252); W_PK=(255,148,188); W_OR=(255,200,96)
 W_OD=(228,164,42);  W_EY=(30,14,48);   W_SH=(255,255,255)
 W_TR=None
 
@@ -271,46 +272,73 @@ W_TR=None
 def clamp_color(r, g, b):
     return (max(0,min(255,int(r))), max(0,min(255,int(g))), max(0,min(255,int(b))))
 
-def draw_glass(surf, x, y, w, h, r=10, tint=(255,255,255), a=42):
+def draw_glass(surf, x, y, w, h, r=10, tint=(255,255,255), a=52):
     s = pygame.Surface((w,h), pygame.SRCALPHA)
     pygame.draw.rect(s, (*tint, a),   (0,0,w,h), border_radius=r)
-    pygame.draw.rect(s, (*tint, 112), (0,0,w,h), 2, border_radius=r)
-    sh = max(1, h//3)
+    pygame.draw.rect(s, (*tint, 150), (0,0,w,h), 2, border_radius=r)
+    # Top sheen — strong gradient covers top 45%
+    sh = max(1, h*9//20)
     for i in range(sh):
-        al = int(65*(1-i/sh))
-        pygame.draw.line(s, (255,255,255,al), (2,i+2),(w-2,i+2))
+        al = int(115 * (1 - i/sh)**1.2)
+        pygame.draw.line(s, (255,255,255,al), (r+1,i+2),(w-r-1,i+2))
+    # Bright centre glint at very top
+    gw = max(8, w*2//5); gx2 = (w-gw)//2
+    for i in range(min(4, sh)):
+        pygame.draw.line(s, (255,255,255, max(0,175-i*42)), (gx2, i+3), (gx2+gw, i+3))
+    # Subtle bottom inner shadow for depth
+    if h > 14:
+        for i in range(min(4, h//4)):
+            ba = int(28*(1-i/4))
+            pygame.draw.line(s,(0,0,0,ba),(r,h-2-i),(w-r,h-2-i))
     surf.blit(s,(int(x),int(y)))
 
-def draw_win(surf, x, y, w, h, title="", r=7):
+def draw_win(surf, x, y, w, h, title="", r=10):
     """Y2K/kawaii window chrome. Returns inner content y."""
     x,y,w,h = int(x),int(y),int(w),int(h)
-    # Drop shadow
-    sh = pygame.Surface((w,h), pygame.SRCALPHA)
-    pygame.draw.rect(sh,(0,0,0,55),(0,0,w,h),border_radius=r)
-    surf.blit(sh,(x+4,y+5))
-    # Window body
+    # Drop shadow — offset (5,6), soft spread
+    for si in range(3):
+        sa = 45 - si*12
+        sd = pygame.Surface((w+si*2, h+si*2), pygame.SRCALPHA)
+        pygame.draw.rect(sd,(0,0,0,sa),(0,0,w+si*2,h+si*2),border_radius=r+si)
+        surf.blit(sd,(x+4-si, y+6-si))
+    # Window body — slightly warm white
     pygame.draw.rect(surf, WIN_BG,  (x,y,w,h), border_radius=r)
     pygame.draw.rect(surf, WIN_BDR, (x,y,w,h), 2, border_radius=r)
-    # Title bar — gradient feel via two rects
-    BAR=22
+    # Title bar — 24px, gradient feel via two rects
+    BAR=24
     pygame.draw.rect(surf, WIN_BAR,  (x,y,w,BAR), border_radius=r)
     pygame.draw.rect(surf, WIN_BAR,  (x,y+r,w,BAR-r))
-    # Subtle lighter stripe at top of bar
-    shine = pygame.Surface((w-4,4), pygame.SRCALPHA)
-    pygame.draw.rect(shine,(255,255,255,55),(0,0,w-4,4),border_radius=2)
-    surf.blit(shine,(x+2,y+2))
+    # Bar highlight gradient (lighter at top, fades down)
+    for bi in range(6):
+        ba = max(0, 80 - bi*14)
+        hl = pygame.Surface((w-8, 1), pygame.SRCALPHA)
+        hl.fill((255,255,255,ba))
+        surf.blit(hl,(x+4, y+2+bi))
     # Window control buttons (X, □, -)
     for bi,(bc,bl) in enumerate([(WIN_BTN,'×'),((200,160,240),'□'),((220,180,250),'−')]):
-        bx=x+w-17-(bi*16); by=y+4
-        pygame.draw.rect(surf,bc,(bx,by,12,12),border_radius=3)
-        pygame.draw.rect(surf,clamp_color(bc[0]-30,bc[1]-30,bc[2]-30),(bx,by,12,12),1,border_radius=3)
+        bx=x+w-18-(bi*17); by=y+5
+        pygame.draw.rect(surf,bc,(bx,by,13,13),border_radius=4)
+        pygame.draw.rect(surf,clamp_color(bc[0]-30,bc[1]-30,bc[2]-30),(bx,by,13,13),1,border_radius=4)
+        # Glint on button
+        gls = pygame.Surface((10,4),pygame.SRCALPHA)
+        gls.fill((255,255,255,60))
+        surf.blit(gls,(bx+2,by+2))
         xr = pygame.font.SysFont("monospace",8,bold=False).render(bl,False,WHI)
-        surf.blit(xr,(bx+6-xr.get_width()//2, by+6-xr.get_height()//2))
+        surf.blit(xr,(bx+7-xr.get_width()//2, by+7-xr.get_height()//2))
     # Title text
     if title:
         tf = pygame.font.SysFont("monospace",9,bold=False).render(title,False,WHI)
-        surf.blit(tf,(x+7, y+BAR//2-tf.get_height()//2))
-    return y+BAR+5
+        surf.blit(tf,(x+8, y+BAR//2-tf.get_height()//2))
+    # Glass sheen on content body
+    cb_h = h - BAR - 2
+    if cb_h > 6:
+        bsh = min(cb_h, cb_h//2+6)
+        body_sh = pygame.Surface((w-6, bsh), pygame.SRCALPHA)
+        for i in range(bsh):
+            al = int(38*(1-(i/bsh)**0.65))
+            pygame.draw.line(body_sh,(255,255,255,al),(2,i),(w-10,i))
+        surf.blit(body_sh,(x+3, y+BAR+3))
+    return y+BAR+6
 
 def grid_bg(surf, col, sp=22, a=30):
     s = pygame.Surface((SW,SH), pygame.SRCALPHA)
@@ -364,13 +392,12 @@ def make_grid(mood, wing_up=False):
     fill(20,6,12,W_OR); fill(20,13,19,W_OR)
     fill(21,7,12,W_OD); fill(21,13,18,W_OD)
 
-    bc=(218,152,190) if mood=='sad' else W_PK
+    bc=(210,110,148) if mood=='sad' else W_PK
     for dr in range(3):
         for dc in range(3): s(9+dr,3+dc,bc); s(9+dr,20+dc,bc)
     if mood=='happy':
         # Extend blush outward — cols 2 and 23 are on the body at row 9-11
         for dr in range(3): s(9+dr,2,W_PK); s(9+dr,23,W_PK)
-        s(8,2,W_PK); s(8,23,W_PK)   # stay on body (col 1/24 are outside body outline)
 
     if mood=='hungry':
         fill(7,11,14,W_OR); fill(8,10,15,W_OR); fill(9,11,14,W_OR)
@@ -401,8 +428,7 @@ def make_grid(mood, wing_up=False):
         eye(3,5); eye(3,17)
         # Huge grin — fill mouth area with orange beak + happy curve
         fill(6,5,9,W_BD); fill(6,17,21,W_BD)
-        # Extra blush (within body)
-        s(8,2,W_PK); s(8,23,W_PK)
+        pass  # no extra row-8 blush pixel
     return G
 
 # Sprite surface cache
@@ -492,7 +518,7 @@ def draw_desk(surf, cx, dy, frame, state):
         pygame.draw.rect(surf, (255,240,255), (ml_x+6, ml_y+8+li*9, lw2, 2), border_radius=1)
     # Accent colour dot at start of each line
     for li in range(5):
-        dc = [(255,230,80),(80,255,200),(255,120,200),(200,180,255),(255,200,80)][li]
+        dc = [(255,120,210),(180,140,255),(255,120,200),(200,180,255),(220,100,255)][li]
         pygame.draw.rect(surf, dc, (ml_x+4, ml_y+7+li*9, 2, 4))
     # Monitor stand + base
     pygame.draw.rect(surf, (240, 190, 225), (ml_x+ml_w//2-5, ml_y+ml_h, 10, 10), border_radius=2)
@@ -539,7 +565,7 @@ def draw_desk(surf, cx, dy, frame, state):
     pygame.draw.rect(surf, (255, 240, 250), (kb_x, kb_y, kb_w, kb_h), border_radius=3)
     pygame.draw.rect(surf, (220, 150, 205), (kb_x, kb_y, kb_w, kb_h), 1, border_radius=3)
     for ki in range(8):
-        kc = [(255,80,200),(200,80,255),(80,200,255),(255,200,80)][ki%4]
+        kc = [(255,80,200),(200,80,255),(230,100,255),(255,130,210)][ki%4]
         pygame.draw.rect(surf, kc, (kb_x+4+ki*9, kb_y+3, 7, 5), border_radius=1)
     # Keyboard glow
     kg = pygame.Surface((kb_w+10, 8), pygame.SRCALPHA)
@@ -775,13 +801,25 @@ TERM_LINES=[
 random.shuffle(TERM_LINES)
 
 # ── SAVE/LOAD ─────────────────────────────────────────────────────────────────
+_SAVE_FILE = os.path.join(_IMG_DIR, "waddle_save.json")
+
 def load_save():
     try:
-        with open("waddle_save.json") as f: return json.load(f)
-    except: return {'points':0,'unlocked':[],'equipped':[]}
+        with open(_SAVE_FILE, encoding='utf-8') as f: return json.load(f)
+    except Exception:
+        return {'points':0,'unlocked':[],'equipped':[]}
 
 def write_save(d):
-    with open("waddle_save.json",'w') as f: json.dump(d,f)
+    with open(_SAVE_FILE, 'w', encoding='utf-8') as f: json.dump(d, f, ensure_ascii=False)
+
+def _apply_location(lat, lon, city):
+    """Update module-level location globals used by Weather fetch."""
+    global LAT, LON, CITY
+    LAT=lat; LON=lon; CITY=city
+    # Patch the loc line in TERM_LINES so Chill screen shows the right city
+    for i,line in enumerate(TERM_LINES):
+        if line.startswith("> loc:"):
+            TERM_LINES[i]=f"> loc: {CITY}"; break
 
 # ── WADDLE STATS ──────────────────────────────────────────────────────────────
 class Waddle:
@@ -801,7 +839,10 @@ class Waddle:
         self.hunger=float(random.randint(18,52))
         self.happiness=float(random.randint(52,86))
         self.energy=float(random.randint(46,80))
-    def save(self): write_save({'points':self.points,'unlocked':self.unlocked,'equipped':self.equipped})
+    def save(self):
+        sv=load_save()
+        sv.update({'points':self.points,'unlocked':self.unlocked,'equipped':self.equipped})
+        write_save(sv)
     @property
     def mood(self):
         if self.hunger>78:    return 'hungry'
@@ -821,7 +862,7 @@ class Waddle:
 
 # ── DODGE GAME ────────────────────────────────────────────────────────────────
 class DodgeGame:
-    PY=SH-64; SPX=3; FW=42; FH=34
+    PY=SH-64; SPX=3; FW=42; FH=34; LIVES=3
     # Cyber pastel file colours — properly saturated pastels, not muddy
     FCOLS=[
         (188, 100, 220),  # pastel purple
@@ -850,8 +891,9 @@ class DodgeGame:
             pygame.draw.line(self._crt, (0,0,0,16), (0,_y),(SW,_y))
         # Virus.exe mechanic
         self.virus_active  = False
+        self.virus_ending  = False    # True while files sweep off-screen at end
         self.virus_t       = 0        # ms elapsed in current virus phase
-        self.virus_trigger = 50       # score that trips the next virus
+        self.virus_trigger = 10       # score that trips the next virus
         self.virus_files   = []       # big slow virus file objects {x,y}
         self.virus_flash   = 0        # ms of red flash on trigger
         # Drifting starfield
@@ -871,18 +913,17 @@ class DodgeGame:
             self.virus_active = True
             self.virus_t      = 0
             self.virus_flash  = 500
-            self.virus_trigger += random.randint(80, 140)
+            self.virus_trigger += random.randint(16, 28)
             self.virus_files  = [
                 {'x': float(random.randint(70, SW-70)), 'y': -80.0},
                 {'x': float(random.randint(70, SW-70)), 'y': -180.0},
             ]
             Sounds.virus_alert()
         if self.virus_active:
-            self.virus_t += dt
-            if self.virus_t >= VIRUS_DUR:
-                self.virus_active = False
-                self.virus_t      = 0
-                self.virus_files.clear()
+            if not self.virus_ending:
+                self.virus_t += dt
+                if self.virus_t >= VIRUS_DUR:
+                    self.virus_ending = True
         if self.virus_flash > 0: self.virus_flash -= dt
 
         # Drift starfield
@@ -890,8 +931,8 @@ class DodgeGame:
             s['y'] = (s['y'] + s['spd']) % SH
 
         # Speed ramp every 50 pts
-        self.speed=2.2+min(3.0,(self.pts//50)*0.35)
-        _nl=1+(self.pts//50)
+        self.speed=2.2+min(3.0,(self.pts//10)*0.35)
+        _nl=1+(self.pts//10)
         if _nl>self.level: self.levelup_t=1400; self.levelup_n=_nl
         self.level=_nl
         if self.levelup_t>0:    self.levelup_t-=dt
@@ -902,7 +943,7 @@ class DodgeGame:
         if keys[pygame.K_LEFT]:  self.px=max(22,self.px-mv)
         if keys[pygame.K_RIGHT]: self.px=min(SW-22,self.px+mv)
         self.dt_d+=dt
-        _d_interval = max(380,1380-self.pts*8) if self.virus_active else max(560,1380-self.pts*8)
+        _d_interval = max(380,1380-self.pts*40) if self.virus_active else max(560,1380-self.pts*40)
         if self.dt_d>_d_interval:
             self.dt_d=0
             self.debris.append({'x':random.randint(self.FW//2+14,SW-self.FW//2-14),
@@ -911,7 +952,8 @@ class DodgeGame:
         if self.dt_f>3200:
             self.dt_f=0
             if random.random()<0.72:
-                self.fish.append({'x':random.randint(34,SW-34),'y':-24})
+                _gold = random.random() < 0.20
+                self.fish.append({'x':random.randint(34,SW-34),'y':-24,'gold':_gold,'val':5 if _gold else 1})
         for d in self.debris: d['y']+=self.speed
         for f in self.fish:   f['y']+=self.speed*0.68
         self.debris=[d for d in self.debris if d['y']<SH+44]
@@ -928,11 +970,12 @@ class DodgeGame:
         head_hw     = 5*self.SPX          # head half-width (narrower than body)
         body_hw     = 9*self.SPX          # keep for fish collection below
 
+        foot_bottom = int(self.PY)   # full sprite vertical extent
         for d in self.debris:
             db_top = d['y'] - self.FH//2
             db_bot = d['y'] + self.FH//2
-            if (db_bot > head_top and db_top < head_bottom
-                    and abs(d['x']-self.px) < head_hw + self.FW//2):
+            if (db_bot > head_top and db_top < foot_bottom
+                    and abs(d['x']-self.px) < body_hw + self.FW//2):
                 if self.invincible_t <= 0:
                     self.combo=0; self.lives-=1; self.hit_flash_t=400
                     if self.lives<=0:
@@ -945,17 +988,17 @@ class DodgeGame:
                         self.w.happiness=max(0,self.w.happiness-5)
                         self.debris=[dd for dd in self.debris if dd['y']<head_top-40]
                         break
-            elif (db_bot > head_top and db_top < head_bottom
-                    and abs(d['x']-self.px) < head_hw + self.FW//2 + 18):
+            elif (db_bot > head_top and db_top < foot_bottom
+                    and abs(d['x']-self.px) < body_hw + self.FW//2 + 18):
                 self.near_miss_t=max(self.near_miss_t,380)
 
         for f in self.fish[:]:
             if (f['y'] > head_top and abs(f['x']-self.px) < body_hw + 16):
                 self.fish.remove(f)
                 self.combo+=1
-                fish=2 if self.combo>=5 else 1
+                fish=f['val']*(2 if self.combo>=5 else 1)
                 self.fish_earned+=fish
-                self.pts+=5
+                self.pts+=f['val']
                 Sounds.catch_fish()
                 # Spawn catch flash particles
                 for _ in range(8):
@@ -971,25 +1014,27 @@ class DodgeGame:
 
         # Virus file movement + collision
         VFW, VFH = 72, 58
+        exit_spd = 9.0 if self.virus_ending else max(1.0, self.speed * 0.55)
         for vf in self.virus_files:
-            vf['y'] += max(1.0, self.speed * 0.55)
+            vf['y'] += exit_spd
         self.virus_files = [vf for vf in self.virus_files if vf['y'] < SH+90]
+        if self.virus_ending and not self.virus_files:
+            self.virus_active = False
+            self.virus_ending = False
+            self.virus_t      = 0
         for vf in self.virus_files:
+            if self.virus_ending: break  # no collision during exit sweep
             vfb_top = vf['y'] - VFH//2
             vfb_bot = vf['y'] + VFH//2
-            if (vfb_bot > head_top and vfb_top < head_bottom
+            if (vfb_bot > head_top and vfb_top < foot_bottom
                     and abs(vf['x']-self.px) < head_hw + VFW//2):
                 if self.invincible_t <= 0:
-                    self.combo=0; self.lives-=1; self.hit_flash_t=400
-                    if self.lives<=0:
-                        self.alive=False
-                        self.w.happiness=max(0,  self.w.happiness-15)
-                        self.w.energy   =max(0,  self.w.energy   -8)
-                        self.w.points  +=self.fish_earned; self.w.save(); return
-                    else:
-                        self.invincible_t=2000
-                        self.w.happiness=max(0,self.w.happiness-5)
-                        break
+                    # Virus = instant death
+                    self.combo=0; self.hit_flash_t=400
+                    self.alive=False
+                    self.w.happiness=max(0,  self.w.happiness-15)
+                    self.w.energy   =max(0,  self.w.energy   -8)
+                    self.w.points  +=self.fish_earned; self.w.save(); return
 
         # Move catch flash particles
         for cf in self.catch_flashes:
@@ -1069,12 +1114,16 @@ class DodgeGame:
         for gx2,gy2 in [(bx+1,by+1),(bx+FW-3,by+1),(bx+1,by+FH-3)]:
             pygame.draw.rect(surf,pale,(gx2,gy2,2,2))
 
-    def _fish(self,surf,x,y):
-        """Cute kawaii fish with proper shading."""
+    def _fish(self,surf,x,y,gold=False):
+        """Cute kawaii fish with proper shading. Gold variant worth 5pts."""
         x,y=int(x),int(y)
-        # Body — aqua-cyan gradient feel
-        FBODY=(88,210,252); FBODY2=(62,185,235); FSHINE=(185,242,255)
-        FTAIL=(58,178,228); FEYE=(18,5,48); FOUT=(42,155,210)
+        if gold:
+            FBODY=(255,215,60); FBODY2=(235,185,30); FSHINE=(255,245,180)
+            FTAIL=(210,165,20); FEYE=(60,30,5); FOUT=(180,130,10)
+        else:
+            # Body — aqua-cyan gradient feel
+            FBODY=(88,210,252); FBODY2=(62,185,235); FSHINE=(185,242,255)
+            FTAIL=(58,178,228); FEYE=(18,5,48); FOUT=(42,155,210)
 
         # Tail fin
         pygame.draw.polygon(surf,FTAIL,[(x-13,y),(x-24,y-8),(x-24,y+8)])
@@ -1106,9 +1155,10 @@ class DodgeGame:
         pygame.draw.circle(surf,FEYE,(x+7,y-1),3)
         pygame.draw.circle(surf,WHI, (x+8,y-2),1)
 
-        # +5 label — white, not yellow
-        lbl=F11.render("+5",False,WHI)
-        surf.blit(lbl,(x-lbl.get_width()//2,y-30))
+        # +5 label — only on gold fish
+        if gold:
+            lbl=F11.render("+5",False,(255,240,100))
+            surf.blit(lbl,(x-lbl.get_width()//2,y-30))
 
     def _virus_file(self,surf,x,y):
         """Big corrupted VIRUS.EXE obstacle — 72×58, red palette, skull face."""
@@ -1163,12 +1213,16 @@ class DodgeGame:
         surf.blit(glow,(bx-11,by-11))
 
     def draw(self,surf):
-        # Hot-pink grid pattern
+        # Deep purple-pink gradient
         for y in range(SH):
             t = y/SH
-            r = clamp_color(int(240-t*30), int(160-t*50), int(225-t*40))
+            r = clamp_color(int(52+t*20), int(10+t*8), int(88+t*22))
             pygame.draw.line(surf, r, (0,y), (SW,y))
-        grid_bg(surf,(230,60,180),22,32)
+        grid_bg(surf,(200,80,255),20,40)
+        # Floor glow strip
+        fl=pygame.Surface((SW,3),pygame.SRCALPHA)
+        pygame.draw.rect(fl,(255,80,200,60),(0,0,SW,3))
+        surf.blit(fl,(0,self.PY))
 
         # Drifting starfield
         for s in self.stars:
@@ -1182,14 +1236,14 @@ class DodgeGame:
         if self.near_miss_t>0:
             na=int((self.near_miss_t/380)*80)
             ef=pygame.Surface((SW,SH),pygame.SRCALPHA)
-            pygame.draw.rect(ef,(255,80,80,na),(0,0,SW,SH),8)
+            pygame.draw.rect(ef,(255,80,150,na),(0,0,SW,SH),8)
             surf.blit(ef,(0,0))
 
         for d in self.debris:
             self._file(surf,d['x'],d['y'],d['col'])
             # Motion trail sparkle above debris tile
             _draw_cross_star(surf,d['col'],d['x'],int(d['y']-self.FH//2),2,38)
-        for f in self.fish:   self._fish(surf,f['x'],f['y'])
+        for f in self.fish:   self._fish(surf,f['x'],f['y'],gold=f.get('gold',False))
 
         # Virus files
         for vf in self.virus_files:
@@ -1227,7 +1281,7 @@ class DodgeGame:
         _draw_spr = not (self.invincible_t>0 and (self.frame//4)%2==0)
         ws=get_spr('happy' if self.alive else 'sad',self.SPX)
         wx=int(self.px-ws.get_width()//2)
-        wy=int(self.PY-ws.get_height()+8*self.SPX)
+        wy=int(self.PY-22*self.SPX)
         if _draw_spr:
             surf.blit(ws,(wx,wy))
             for eid in self.w.equipped:
@@ -1243,30 +1297,28 @@ class DodgeGame:
             blit_c(_lv,F8,"♡  keep going  ♡",(220,160,255),SW//2,34)
             surf.blit(_lv,(0,SH//2-28))
 
-        # ── HUD ── single centred POINTS panel ──
-        hud_w=168
-        hx=SW//2-hud_w//2
-        cy=draw_win(surf,hx,8,hud_w,106,"DODGE.EXE")
-        blit_c(surf,F8,f"POINTS  LVL {self.level}",(80,45,155),SW//2,cy+2)
-        blit_c(surf,F18,f"{self.pts:04d}",(45,18,100),SW//2,cy+14)
-        for _li in range(3):
-            _hc=(255,80,155) if _li<self.lives else (55,20,75)
-            _draw_pixel_heart(surf,_hc,SW//2-22+_li*22,cy+36,px=2,alpha=220)
+        # ── HUD: LVL / fish / lives ──
+        hud_w=128; hx=SW//2-hud_w//2
+        cy=draw_win(surf,hx,6,hud_w,96,"DODGE.EXE")
+        blit_c(surf,F11,f"LVL {self.level}",(80,45,155),SW//2,cy+7)
+        blit_c(surf,F11,f"{self.fish_earned}",(80,45,155),SW//2,cy+22)
+        _hgap=5; _hw=21
+        _htotal=self.LIVES*_hw+(self.LIVES-1)*_hgap
+        _hx0=SW//2-_htotal//2
+        for _li in range(self.LIVES):
+            _hc=(255,80,155) if _li<self.lives else (80,40,100)
+            _draw_pixel_heart(surf,_hc,_hx0+_li*(_hw+_hgap)+_hw//2,cy+43,px=3,alpha=220)
+        # Virus bar — floats just below window when active
         if self.virus_active:
             prog=min(1.0,self.virus_t/8000)
-            _bw=130; _bx2=SW//2-_bw//2
+            _bw=hud_w-16; _bx2=hx+8; _vy=6+96+3
             _vc=(255,80,110) if (self.frame//8)%2==0 else (190,40,75)
-            blit_c(surf,F8,"VIRUS.EXE CLEANING",_vc,SW//2,cy+50)
-            pygame.draw.rect(surf,(55,18,75),(_bx2,cy+62,_bw,8),border_radius=3)
+            _vl=F8.render("virus cleaning",True,_vc)
+            surf.blit(_vl,(SW//2-_vl.get_width()//2,_vy))
+            pygame.draw.rect(surf,(55,18,75),(_bx2,_vy+10,_bw,5),border_radius=2)
             _fw=int(_bw*prog)
             if _fw>0:
-                pygame.draw.rect(surf,(255,50,100),(_bx2,cy+62,_fw,8),border_radius=3)
-        elif self.combo>=5:
-            cc=(255,180,220)
-            blit_c(surf,F8,f"★ x2 FISH STREAK!",cc,SW//2,cy+50)
-        elif self.combo>1:
-            cc=clamp_color(255,max(80,160-self.combo*8),min(255,180+self.combo*5))
-            blit_c(surf,F8,f"x{self.combo} streak",cc,SW//2,cy+50)
+                pygame.draw.rect(surf,(255,50,100),(_bx2,_vy+10,_fw,5),border_radius=2)
 
         if not self.alive:
             ov=pygame.Surface((SW,SH),pygame.SRCALPHA)
@@ -1277,11 +1329,10 @@ class DodgeGame:
                 _gs=pygame.Surface((SW,2),pygame.SRCALPHA)
                 _gs.fill((200,40,100,38))
                 surf.blit(_gs,(random.randint(-8,8),_gy))
-            cy3=draw_win(surf,SW//2-130,SH//2-70,260,140,"SYSTEM CRASH")
+            cy3=draw_win(surf,SW//2-130,SH//2-70,260,140,"GAME OVER")
             blit_c(surf,F32,"GAME OVER",(255,75,155),SW//2,cy3+4)
-            blit_c(surf,F8,"──────────────────",(100,50,140),SW//2,cy3+36)
-            blit_c(surf,F8,"fish earned",(160,110,220),SW//2,cy3+50)
-            blit_c(surf,F24,f"{self.fish_earned}",(255,75,155),SW//2,cy3+64)
+            blit_c(surf,F8,"fish earned",(160,110,220),SW//2,cy3+48)
+            blit_c(surf,F32,f"{self.fish_earned}",(255,75,155),SW//2,cy3+64)
             if (self.frame//14)%2==0:
                 blit_c(surf,F8,"press ESC to exit",(120,60,160),SW//2,cy3+100)
 
@@ -1331,6 +1382,23 @@ def _draw_cloud_puff(surf, cx, cy, w=52, col=(255,255,255), alpha=200):
                        (3*w//4,mid_y,w//5),(w//2,mid_y,w//6)]:
         pygame.draw.circle(cs,(r,g,b,alpha),(ox2,oy2),cr)
     surf.blit(cs,(cx-w//2-15, cy-top_cy))
+
+
+def _draw_hud_fish(surf, cx, cy):
+    """Tiny kawaii fish icon for the score HUD — ~18×12px."""
+    fc=(88,210,252); fdk=(42,155,210); feye=(18,5,48)
+    # Tail
+    pygame.draw.polygon(surf,fc,[(cx-8,cy),(cx-14,cy-5),(cx-14,cy+5)])
+    # Body
+    pygame.draw.ellipse(surf,fc,(cx-7,cy-5,18,10))
+    # Belly shine
+    pygame.draw.ellipse(surf,clamp_color(fc[0]+40,fc[1]+40,fc[2]+40),(cx-4,cy-3,10,5))
+    # Top fin
+    pygame.draw.polygon(surf,fdk,[(cx-1,cy-5),(cx+4,cy-9),(cx+7,cy-5)])
+    # Eye
+    pygame.draw.circle(surf,(240,230,255),(cx+6,cy-1),3)
+    pygame.draw.circle(surf,feye,(cx+6,cy-1),2)
+    pygame.draw.circle(surf,(255,255,255),(cx+7,cy-2),1)
 
 
 def _draw_ddr_arrow(surf, direction, col, cx, cy, sz=13, alpha=255):
@@ -1384,9 +1452,9 @@ class DreamGame:
     ARFULL= {'func()':'↑','return':'↓','if (x):':'←','while{}':'→'}
     ALABEL= {'func()':'UP','return':'DOWN','if (x):':'LEFT','while{}':'RIGHT'}
     ARDIR = {'func()':'up','return':'down','if (x):':'left','while{}':'right'}
-    KCOLS = {'func()': (255,160, 80),   # warm orange
-             'return': ( 80,200,255),   # cyan
-             'if (x):':(160,255,110),   # green
+    KCOLS = {'func()': (255,120,210),   # hot pink
+             'return': (180,120,255),   # lavender
+             'if (x):':(255, 60,185),   # magenta
              'while{}':(220,130,255)}   # purple
     LIVES = 3   # starting lives; max lives = 5
 
@@ -1401,6 +1469,7 @@ class DreamGame:
         # At streak 5 → earn 2 fish AND gain +1 life (up to 5), then streak resets.
         self.streak    = 0
         self.fish_earned = 0             # cumulative fish earned this session
+        self.last_earn   = 0             # fish earned on the most recent win
         self.shake_t   = 0               # ms remaining for shake
         self.err_flash = 0               # ms remaining for red flash
         self.sparkles  = []              # ambient floating hearts/stars
@@ -1469,16 +1538,18 @@ class DreamGame:
                     })
                 self.ii+=1
                 if self.ii>=len(self.seq):
-                    # 1 fish per round; 2 fish on the 5th consecutive round (+life)
+                    # 1 fish per correct key; x2 on 5th streak (+life)
                     self.streak+=1
+                    base=len(self.seq)
                     if self.streak>=5:
-                        earn=2
+                        earn=base*2
                         self.lives=min(5,self.lives+1)
                         self.streak=0
                         self.hlines.append(f">> +{earn} fish  BUILD OK  [+LIFE!]")
                     else:
-                        earn=1
+                        earn=base
                         self.hlines.append(f">> +{earn} fish  BUILD OK")
+                    self.last_earn=earn
                     self.fish_earned+=earn
                     self.w.points+=earn
                     self.w.save()
@@ -1573,7 +1644,7 @@ class DreamGame:
             lx,ly=rope_pts[li]
             wire_len=7+int(math.sin(li*0.9)*3)
             pygame.draw.line(surf,(60,38,88),(lx,ly),(lx,ly+wire_len),1)
-            lc=[(255,140,220),(195,120,255),(120,185,255),(255,120,210),(170,200,255),(255,95,195)][li%6]
+            lc=[(255,140,220),(195,120,255),(120,185,255),(255,215,90),(170,255,195),(255,95,195)][li%6]
             fv=max(0.0,0.48+0.52*math.sin(self.frame*0.07+li*0.65))
             for gr in range(13,0,-2):
                 ga=max(0,int(58*fv*(gr/13)))
@@ -1784,10 +1855,10 @@ class DreamGame:
         if self.state=='fail':
             ov=pygame.Surface((SW,SH),pygame.SRCALPHA)
             ov.fill((20,5,10,210)); surf.blit(ov,(0,0))
-            cy=draw_win(surf,SW//2-130,SH//2-65,260,130,"BUILD FAILED")
+            cy=draw_win(surf,SW//2-130,SH//2-70,260,140,"BUILD FAILED")
             blit_c(surf,F32,"BUILD FAILED",(255,60,100),SW//2,cy+4)
-            blit_c(surf,F8,"fish earned",(160,110,220),SW//2,cy+52)
-            blit_c(surf,F24,f"{self.fish_earned}",(255,75,155),SW//2,cy+68)
+            blit_c(surf,F8,"fish earned",(160,110,220),SW//2,cy+48)
+            blit_c(surf,F32,f"{self.fish_earned}",(255,75,155),SW//2,cy+64)
             return
 
         # ── CODE TILES — large centered DDR arrows only ──
@@ -1869,14 +1940,14 @@ class DreamGame:
         for i in range(len(self.seq)):
             dx=int(SW//2-(n_seq-1)*dot_spacing//2+i*dot_spacing)
             if i<self.ii:
-                pygame.draw.circle(surf,(100,235,140),(dx,dot_y),5)
-                pygame.draw.circle(surf,(60,200,100),(dx,dot_y),5,1)
+                pygame.draw.circle(surf,(255,140,220),(dx,dot_y),5)
+                pygame.draw.circle(surf,(200,80,200),(dx,dot_y),5,1)
             else:
                 pygame.draw.circle(surf,(80,50,130),(dx,dot_y),4)
                 pygame.draw.circle(surf,(130,80,190),(dx,dot_y),4,1)
 
         # Fish pill — right inside pill
-        blit_l(surf,F11,f"✦{self.fish_earned:03d}",(90,230,135),SW-68+ox,dot_y-7+oy)
+        blit_l(surf,F11,f"✦{self.fish_earned:03d}",(220,140,255),SW-68+ox,dot_y-7+oy)
 
         # Particle burst draw
         for p in self.particles:
@@ -1898,26 +1969,29 @@ class DreamGame:
             else:                lc=(82,52,138)
             blit_l(surf,F_SM,tl,lc,term_x+8,cy2+i*14,aa=True)
         if self.frame%20<10:
-            cw2=F_SM.size(shown[-1])[0] if shown else 0
-            pygame.draw.rect(surf,(100,62,155),(term_x+8+min(cw2,max_tw2),cy2+len(shown)*14-11,6,9))
+            if shown:
+                cw2=F_SM.size(shown[-1])[0]
+                pygame.draw.rect(surf,(100,62,155),(term_x+8+min(cw2,max_tw2),cy2+(len(shown)-1)*14+2,6,9))
+            else:
+                pygame.draw.rect(surf,(100,62,155),(term_x+8,cy2+2,6,9))
 
         # ── Status bar (above terminal) ──
         if self.state in('showing','waiting','win','lose'):
             msgs={'showing':f"watch carefully...  {self.si+1} / {len(self.seq)}",
                   'waiting':f"your turn!  {self.ii} / {len(self.seq)} done",
-                  'win':    f"✦ round {self.rnd-1} compiled!  +{5+(self.rnd-1)*2} fish",
+                  'win':    f"✦ round {self.rnd-1} compiled!  +{self.last_earn} fish",
                   'lose':   f"✕ wrong!  {self.lives} {'life' if self.lives==1 else 'lives'} left  — retrying..."}
-            mcols={'showing':(55,18,95),'waiting':(18,85,42),
-                   'win':(15,110,50),'lose':(155,28,48)}
+            mcols={'showing':(55,18,95),'waiting':(38,18,90),
+                   'win':(80,18,160),'lose':(155,28,48)}
             sy2=term_y-26+oy
             if self.state=='win':
                 sy2-=int(abs(math.sin(self.res_t*0.007))*6)
             sb=pygame.Surface((SW-20,22),pygame.SRCALPHA)
-            _bg_col=(235,255,235,230) if self.state=='win' else \
+            _bg_col=(238,220,255,230) if self.state=='win' else \
                     (255,235,235,230) if self.state=='lose' else (255,245,255,220)
             pygame.draw.rect(sb,_bg_col,(0,0,SW-20,22),border_radius=6)
             surf.blit(sb,(10+ox,sy2))
-            _bdr=(80,180,80) if self.state=='win' else (200,60,60) if self.state=='lose' else (210,100,195)
+            _bdr=(160,80,220) if self.state=='win' else (200,60,60) if self.state=='lose' else (210,100,195)
             pygame.draw.rect(surf,_bdr,(10+ox,sy2,SW-20,22),1,border_radius=6)
             blit_c(surf,F11,msgs[self.state],mcols[self.state],SW//2+ox,sy2+4)
 
@@ -1937,13 +2011,13 @@ class DreamGame:
 # ── WARDROBE CATALOG ──────────────────────────────────────────────────────────
 ITEMS = [
     {'id':'bow',    'name':'Pink Bow',        'cost':50,  'type':'hat',    'col':(255,140,195)},
-    {'id':'tophat', 'name':'Top Hat',         'cost':100, 'type':'hat',    'col':(55, 35, 85)},
-    {'id':'crown',  'name':'Star Crown',      'cost':200, 'type':'hat',    'col':(255,215,55)},
+    {'id':'tophat', 'name':'Star Band',        'cost':100, 'type':'hat',    'col':(200,120,255)},
+    {'id':'crown',  'name':'Star Crown',      'cost':200, 'type':'hat',    'col':(235,150,210)},
     {'id':'beret',  'name':'Lilac Beret',     'cost':80,  'type':'hat',    'col':(168,110,228)},
-    {'id':'halo',   'name':'Flip Phone',      'cost':150, 'type':'hat',    'col':(255,220,80)},
-    {'id':'horns',  'name':'Angel Halo',      'cost':120, 'type':'hat',    'col':(255,235,120)},
+    {'id':'halo',   'name':'Flip Phone',      'cost':150, 'type':'hat',    'col':(180,120,255)},
+    {'id':'horns',  'name':'Angel Halo',      'cost':120, 'type':'hat',    'col':(200,155,255)},
     {'id':'shades', 'name':'Cool Shades',     'cost':80,  'type':'glasses','col':(28, 18, 48)},
-    {'id':'hrtgls', 'name':'Leopard Tie',     'cost':110, 'type':'scarf',  'col':(200,150,70)},
+    {'id':'hrtgls', 'name':'Cherry Charm',    'cost':110, 'type':'scarf',  'col':(220,50,90)},
     {'id':'scarf',  'name':'Pink Scarf',      'cost':60,  'type':'scarf',  'col':(255,150,195)},
     {'id':'necktie','name':'Heart Necklace',  'cost':70,  'type':'scarf',  'col':(180,100,255)},
 ]
@@ -1962,13 +2036,13 @@ def draw_accessory(surf, item_id, col, ox, oy, px=7):
 
     hcx   = ox + int(13*px)
     htop  = oy
-    heye  = oy + int(4*px)
-    hneck = oy + int(16*px)
+    heye  = oy + (9*px)//2   # eye block rows 3-6, centre at row 4.5
+    hneck = oy + int(10*px)
     dk    = clamp_color(col[0]-40, col[1]-40, col[2]-40)
     lt    = clamp_color(col[0]+40, col[1]+40, col[2]+40)
 
     if item_id == 'bow':
-        bx, by2 = hcx, htop - S(6)
+        bx, by2 = hcx, htop - S(2)
         lw = Sz(20); lh = Sz(14)
         # Ribbon tails (behind lobes)
         pygame.draw.polygon(surf, dk, [
@@ -1992,13 +2066,16 @@ def draw_accessory(surf, item_id, col, ox, oy, px=7):
         surf.blit(shs, (bx-S(20), by2-S(8)))
 
     elif item_id == 'tophat':
-        bw = Sz(30); bh = Sz(5); hw2 = Sz(22); hh = Sz(18)
-        pygame.draw.rect(surf, col,  (hcx-bw//2, htop-bh, bw, bh), border_radius=2)
-        pygame.draw.rect(surf, col,  (hcx-hw2//2, htop-bh-hh, hw2, hh), border_radius=2)
-        band = clamp_color(col[0]+60, col[1]+60, col[2]+80)
-        pygame.draw.rect(surf, band, (hcx-hw2//2, htop-bh-S(6), hw2, Sz(4)))
-        pygame.draw.rect(surf, clamp_color(col[0]+40,col[1]+40,col[2]+40),
-                         (hcx-hw2//2+S(2), htop-bh-hh+S(2), max(1,hw2-S(4)), Sz(3)))
+        # Y2K Star Headband — stretchy band with sparkle stars on top
+        bw = Sz(38); bh = Sz(8)
+        # Band across forehead
+        pygame.draw.rect(surf, col, (hcx-bw//2, htop-S(5), bw, bh), border_radius=Sz(4))
+        pygame.draw.rect(surf, dk,  (hcx-bw//2, htop-S(5), bw, bh), 1, border_radius=Sz(4))
+        # Shimmer stripe
+        pygame.draw.rect(surf, lt,  (hcx-bw//2+S(4), htop-S(4), Sz(14), Sz(2)))
+        # Three sparkle stars above the band
+        for sxo, ssz in [(-S(13), Sz(5)), (0, Sz(7)), (S(13), Sz(5))]:
+            _draw_cross_star(surf, lt, hcx+sxo, htop-S(8)-ssz, ssz, 220)
 
     elif item_id == 'crown':
         bw = Sz(28); bh = Sz(8)
@@ -2008,7 +2085,7 @@ def draw_accessory(surf, item_id, col, ox, oy, px=7):
                 (hcx+xo-S(5), htop-bh),
                 (hcx+xo+S(5), htop-bh),
                 (hcx+xo,      htop-bh-ch2)])
-        for xo, gc in [(-S(10),(255,140,200)), (0,(140,200,255)), (S(10),(200,255,140))]:
+        for xo, gc in [(-S(10),(255,140,200)), (0,(190,140,255)), (S(10),(255,180,225))]:
             pygame.draw.circle(surf, gc, (hcx+xo, htop-S(4)), Sz(3))
 
     elif item_id == 'beret':
@@ -2024,13 +2101,13 @@ def draw_accessory(surf, item_id, col, ox, oy, px=7):
         surf.blit(s2, (hcx-S(12), htop-S(11)))
 
     elif item_id == 'halo':
-        # Flip Phone — at ear, scales with head size
-        fpx2 = hcx + S(13); fpy2 = heye - S(6)
+        # Flip Phone — held at right wing tip (col 22-25, row 12-13)
+        fpx2 = hcx + S(63); fpy2 = hneck + S(14)
         pw   = Sz(9); half = Sz(7)
         dkp  = clamp_color(col[0]-50, col[1]-50, col[2]-50)
         ltp  = clamp_color(col[0]+40, col[1]+40, col[2]+40)
         pygame.draw.rect(surf, dkp,          (fpx2, fpy2,         pw, half), border_radius=2)
-        pygame.draw.rect(surf, (100,200,255),(fpx2+S(1), fpy2+S(1), max(1,pw-S(2)), max(1,half-S(3))))
+        pygame.draw.rect(surf, (220,140,255),(fpx2+S(1), fpy2+S(1), max(1,pw-S(2)), max(1,half-S(3))))
         pygame.draw.rect(surf, ltp,          (fpx2+pw//2-S(1), fpy2-S(3), Sz(3), Sz(4)))
         pygame.draw.rect(surf, ltp,          (fpx2, fpy2+half, pw, Sz(2)))
         pygame.draw.rect(surf, col,          (fpx2, fpy2+half+S(2), pw, max(1,half+S(1))), border_radius=2)
@@ -2042,7 +2119,7 @@ def draw_accessory(surf, item_id, col, ox, oy, px=7):
     elif item_id == 'horns':
         # Angel Halo — flat glowing ring, properly scaled
         hy   = htop - S(10)
-        rw   = Sz(34); rh = Sz(14); thick = max(1,S(5))
+        rw   = Sz(34); rh = Sz(14); thick = max(2,S(5))
         gw   = rw+Sz(18); gh = rh+Sz(14)
         glow = pygame.Surface((gw, gh), pygame.SRCALPHA)
         for gi in range(min(S(9),gw//2), 0, max(1,S(3))):
@@ -2055,69 +2132,73 @@ def draw_accessory(surf, item_id, col, ox, oy, px=7):
             (hcx-S(11), hy-S(4), Sz(22), Sz(8)), max(1,S(2)))
 
     elif item_id == 'shades':
-        lo = Sz(11)       # lens centre offset from head centre
-        lw2 = Sz(14); lh2 = Sz(9)
+        lo = Sz(42)       # eyes are 6 grid cols from centre → ±42px at px=7
+        lw2 = Sz(22); lh2 = Sz(12)
         for side in [-1, 1]:
             lx2 = hcx + side*lo - lw2//2
             pygame.draw.rect(surf, col, (lx2, heye-lh2//2, lw2, lh2), border_radius=max(1,S(3)))
             pygame.draw.rect(surf, clamp_color(col[0]+40,col[1]+40,col[2]+40),
                              (lx2, heye-lh2//2, lw2, lh2), 1, border_radius=max(1,S(3)))
-            sw2 = Sz(5); sh3 = Sz(3)
+            sw2 = Sz(8); sh3 = Sz(4)
             shs2 = pygame.Surface((sw2, sh3), pygame.SRCALPHA)
             shs2.fill((255,255,255,70))
             surf.blit(shs2, (lx2+S(2), heye-lh2//2+S(1)))
-        pygame.draw.line(surf, col, (hcx-S(1), heye), (hcx+S(1), heye), max(1,S(2)))
+        # Short nose bridge between lenses
+        pygame.draw.line(surf, col, (hcx-S(6), heye), (hcx+S(6), heye), max(1,S(2)))
 
     elif item_id == 'hrtgls':
-        # Leopard Print Tie
-        ltp2 = clamp_color(col[0]+40, col[1]+40, col[2]+40)
-        dkp2 = clamp_color(col[0]-50, col[1]-50, col[2]-50)
-        pygame.draw.polygon(surf, col, [
-            (hcx-S(5), hneck),      (hcx+S(5), hneck),
-            (hcx+S(4), hneck+S(5)), (hcx+S(3), hneck+S(14)),
-            (hcx,      hneck+S(19)),(hcx-S(3), hneck+S(14)),
-            (hcx-S(4), hneck+S(5))])
-        pygame.draw.polygon(surf, ltp2, [
-            (hcx-S(6), hneck-S(3)), (hcx+S(6), hneck-S(3)),
-            (hcx+S(5), hneck+S(2)), (hcx-S(5), hneck+S(2))])
-        for sxo, syo in [(-S(1),S(5)), (S(2),S(10)), (-S(2),S(15))]:
-            pygame.draw.ellipse(surf, (55,30,5),
-                (hcx+sxo-Sz(2), hneck+syo-Sz(1), Sz(5), Sz(3)))
-        pygame.draw.polygon(surf, dkp2, [
-            (hcx-S(5), hneck),      (hcx+S(5), hneck),
-            (hcx+S(4), hneck+S(5)), (hcx+S(3), hneck+S(14)),
-            (hcx,      hneck+S(19)),(hcx-S(3), hneck+S(14)),
-            (hcx-S(4), hneck+S(5))], 1)
+        # Cherry Charm necklace — Y2K kawaii
+        chain_y = hneck - S(2)
+        cr_col = (210, 35, 70)       # cherry red
+        cr_lt  = (245, 100, 130)     # highlight
+        stem_col = (55, 130, 55)     # stem green
+        ltn2 = clamp_color(col[0]+50, col[1]+50, col[2]+50)
+        # Chain links across neckline
+        for cx3 in range(hcx-S(16), hcx+S(17), max(1,S(4))):
+            pygame.draw.circle(surf, ltn2, (cx3, chain_y), Sz(2))
+        # Y-shaped stems
+        mid_x = hcx - S(2)
+        pygame.draw.line(surf, stem_col, (mid_x, chain_y+S(2)), (hcx-S(8), chain_y+S(11)), max(1,Sz(2)))
+        pygame.draw.line(surf, stem_col, (mid_x, chain_y+S(2)), (hcx+S(4), chain_y+S(11)), max(1,Sz(2)))
+        pygame.draw.line(surf, stem_col, (mid_x, chain_y), (mid_x, chain_y+S(3)), max(1,Sz(2)))
+        # Two cherries
+        cr = max(3, Sz(5))
+        pygame.draw.circle(surf, cr_col, (hcx-S(8), chain_y+S(11)), cr)
+        pygame.draw.circle(surf, cr_col, (hcx+S(4), chain_y+S(11)), cr)
+        # Highlights
+        pygame.draw.circle(surf, cr_lt, (hcx-S(10), chain_y+S(9)), max(1,cr//2))
+        pygame.draw.circle(surf, cr_lt, (hcx+S(2),  chain_y+S(9)), max(1,cr//2))
 
     elif item_id == 'scarf':
         sc1 = col
         sc2 = clamp_color(col[0]-30, col[1]-30, col[2]-30)
         lts = clamp_color(col[0]+40, col[1]+40, col[2]+40)
-        bw2 = Sz(34); fw = Sz(28); fh = Sz(8)
-        pygame.draw.rect(surf, sc2, (hcx-S(17), hneck-S(2), bw2, Sz(10)), border_radius=Sz(5))
-        pygame.draw.rect(surf, sc1, (hcx-S(14), hneck,      fw,  fh),     border_radius=Sz(4))
+        bw2 = Sz(56); fw = Sz(48); fh = Sz(9)
+        pygame.draw.rect(surf, sc2, (hcx-S(28), hneck-S(2), bw2, Sz(11)), border_radius=Sz(6))
+        pygame.draw.rect(surf, sc1, (hcx-S(24), hneck,      fw,  fh),     border_radius=Sz(5))
         step = max(1, S(6))
         for i in range(0, fw, step):
-            pygame.draw.line(surf, lts, (hcx-S(14)+i, hneck+S(1)), (hcx-S(14)+i, hneck+fh-S(1)), 1)
-        kw2 = Sz(10); kh2 = Sz(12)
-        pygame.draw.ellipse(surf, sc1, (hcx+S(8), hneck-S(4), kw2, kh2))
-        pygame.draw.ellipse(surf, sc2, (hcx+S(8), hneck-S(4), kw2, kh2), 1)
-        tw = Sz(8); th2 = Sz(14)
-        pygame.draw.rect(surf, sc1, (hcx+S(9), hneck+S(7), tw, th2), border_radius=Sz(3))
+            pygame.draw.line(surf, lts, (hcx-S(24)+i, hneck+S(1)), (hcx-S(24)+i, hneck+fh-S(1)), 1)
+        # Knot ball on right side
+        kw2 = Sz(12); kh2 = Sz(14)
+        pygame.draw.ellipse(surf, sc1, (hcx+S(22), hneck-S(5), kw2, kh2))
+        pygame.draw.ellipse(surf, sc2, (hcx+S(22), hneck-S(5), kw2, kh2), 1)
+        tw = Sz(8); th2 = Sz(16)
+        pygame.draw.rect(surf, sc1, (hcx+S(24), hneck+S(8), tw, th2), border_radius=Sz(3))
         fstep = max(1, S(3))
         for fi in range(0, tw, fstep):
-            pygame.draw.line(surf, sc2, (hcx+S(9)+fi, hneck+S(7)+th2), (hcx+S(8)+fi, hneck+S(7)+th2+S(4)), max(1,S(2)))
+            pygame.draw.line(surf, sc2, (hcx+S(24)+fi, hneck+S(8)+th2), (hcx+S(23)+fi, hneck+S(8)+th2+S(4)), max(1,S(2)))
 
     elif item_id == 'necktie':
         ltn = clamp_color(col[0]+50, col[1]+50, col[2]+50)
         chain_y = hneck - S(3)
         cr2 = Sz(2)
         cstep = max(1, S(4))
-        for cx3 in range(hcx-S(11), hcx+S(12), cstep):
+        for cx3 in range(hcx-S(18), hcx+S(19), cstep):
             pygame.draw.circle(surf, ltn, (cx3, chain_y), cr2)
         for cy3 in range(chain_y+S(4), chain_y+S(15), cstep):
             pygame.draw.circle(surf, ltn, (hcx, cy3), cr2)
-        hs = max(1, int(round(3*sc)))
+        hs = max(2, int(round(3*sc)))
         _heart(surf, (*col, 240), hcx-S(6), chain_y+S(14), hs)
         _heart(surf, (*clamp_color(col[0]-40, col[1]-40, col[2]-40), 180),
                hcx-S(6), chain_y+S(14), hs)
@@ -2128,11 +2209,13 @@ class Wardrobe:
     COLS = 5   # 10 items → 2 rows of 5
 
     def __init__(self, w):
-        self.w     = w
-        self.frame = 0
-        self.sel   = 0
-        self.msg   = ''
-        self.msg_t = 0
+        self.w          = w
+        self.frame      = 0
+        self.sel        = 0
+        self.msg        = ''
+        self.msg_t      = 0
+        self.settings   = False   # settings overlay open
+        self.settings_sel = 0    # selected option in settings overlay (0-3)
         # Pre-build background shimmer pattern (done once, not every frame)
         self._bg = pygame.Surface((SW, SH), pygame.SRCALPHA)
         for ci in range(0, SW, 18):
@@ -2142,25 +2225,52 @@ class Wardrobe:
 
     def handle_event(self, ev):
         if ev.type == pygame.KEYDOWN:
+            if self.settings:
+                if ev.key == pygame.K_ESCAPE:
+                    self.settings = False; return None
+                elif ev.key == pygame.K_UP:
+                    self.settings_sel = (self.settings_sel - 1) % 4
+                elif ev.key == pygame.K_DOWN:
+                    self.settings_sel = (self.settings_sel + 1) % 4
+                elif ev.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    if self.settings_sel == 0:
+                        self.w.points+=100; self.w.save()
+                        self._flash("✦ +100 fish! motherload ✦"); Sounds.happy_chime()
+                    elif self.settings_sel == 1:
+                        self.settings = False
+                        return 'change_city'
+                    elif self.settings_sel == 2:
+                        write_save({})   # wipe everything including city
+                        self.settings = False
+                        return 'restart'
+                    self.settings = False
+                return None
             n = len(ITEMS)
+            total_slots = n + 1   # 0-9 items, 10 = settings gear
             if ev.key == pygame.K_ESCAPE:   return 'back'
             if ev.key == pygame.K_LEFT:
-                self.sel = (self.sel - 1) % n;  Sounds.menu_beep()
+                if self.sel == 10:   self.sel = n - 1
+                else:                self.sel = (self.sel - 1) % n
+                Sounds.menu_beep()
             elif ev.key == pygame.K_RIGHT:
-                self.sel = (self.sel + 1) % n;  Sounds.menu_beep()
+                if self.sel == n - 1:  self.sel = 10
+                elif self.sel == 10:   self.sel = 0
+                else:                  self.sel = (self.sel + 1) % n
+                Sounds.menu_beep()
             elif ev.key == pygame.K_UP:
-                self.sel = (self.sel - self.COLS) % n; Sounds.menu_beep()
+                if self.sel == 10:   self.sel = n - 1
+                else:                self.sel = (self.sel - self.COLS) % n
+                Sounds.menu_beep()
             elif ev.key == pygame.K_DOWN:
-                self.sel = (self.sel + self.COLS) % n; Sounds.menu_beep()
+                if self.sel >= n - self.COLS:  self.sel = 10   # last row → settings
+                elif self.sel == 10:           self.sel = 0
+                else:                          self.sel = (self.sel + self.COLS) % n
+                Sounds.menu_beep()
             elif ev.key in (pygame.K_RETURN, pygame.K_SPACE):
-                self._action(); Sounds.confirm()
-            elif ev.key == pygame.K_r:
-                # Reset with confirmation baked in for now
-                self.w.points  = 0
-                self.w.unlocked= []
-                self.w.equipped= []
-                self.w.save()
-                self._flash("reset!")
+                if self.sel == 10:
+                    self.settings = True; self.settings_sel = 0
+                else:
+                    self._action(); Sounds.confirm()
         return None
 
     def _action(self):
@@ -2200,14 +2310,14 @@ class Wardrobe:
         self.frame += 1
         if self.msg_t > 0: self.msg_t -= dt
 
-    def _draw_item_card(self, surf, it, ix, iy, cw, ch, state):
+    def _draw_item_card(self, surf, it, ix, iy, cw, ch, state, focused=False):
         """state: 'locked'|'unlocked'|'equipped'|'selected'
-        ch is passed in as 114 — layout (all relative to iy):
-          soy = iy+32  (sprite top — leaves 32px headroom for halo/crown above)
-          spr (px=2, 56px tall) → iy+88
-          stand                 → iy+90 .. iy+97
-          badge                 → iy+99 .. iy+112
-          name (drawn last)     → iy+4
+        ch=110 layout (all relative to iy):
+          name pill   iy+3  .. iy+17
+          hat headroom iy+17 .. iy+28  (crown/halo sit here)
+          sprite top  iy+28, visual bottom iy+72  (22 rows × 2px)
+          stand       iy+74 .. iy+77
+          badge       iy+80 .. iy+97
         """
         iid = it['id']
         col = it['col']
@@ -2223,8 +2333,8 @@ class Wardrobe:
             bdr_col  = col; bdr_w = 3
         elif state == 'selected':
             card_col = (232, 215, 255)
-            p = int(120+100*math.sin(self.frame*0.15))
-            bdr_col  = (p, 90, 255); bdr_w = 3
+            p = int(180+55*math.sin(self.frame*0.15))
+            bdr_col  = (p, 50, 230); bdr_w = 3
         elif state == 'unlocked':
             card_col = (228, 218, 252); bdr_col = (148,108,228); bdr_w = 2
         else:
@@ -2235,6 +2345,11 @@ class Wardrobe:
         surf.blit(cs, (ix, iy))
         pygame.draw.rect(surf, bdr_col, (ix,iy,cw,ch), bdr_w, border_radius=12)
 
+        # ── Focus pulse ring for any focused (cursor-on) card ──
+        if focused and state not in ('equipped','selected'):
+            p = int(180+55*math.sin(self.frame*0.15))
+            pygame.draw.rect(surf,(p,50,230),(ix-1,iy-1,cw+2,ch+2),2,border_radius=13)
+
         # ── Subtle inner shimmer for equipped/selected ──
         if state in ('equipped','selected'):
             glow_s = pygame.Surface((cw-4,ch-4),pygame.SRCALPHA)
@@ -2242,13 +2357,22 @@ class Wardrobe:
             pygame.draw.rect(glow_s,(*bdr_col,ga),(0,0,cw-4,ch-4),border_radius=10)
             surf.blit(glow_s,(ix+2,iy+2))
 
-        # ── Mini Waddle (px=2) — sprite top at iy+32, accessories clipped to card ──
+        # ── Mini Waddle (px=2) — sprite top at iy+28, accessories clipped to card ──
+        # Layout: soy+spr_h+2=stand=iy+86, badge=iy+92, badge+17=iy+109 < ch=110 ✓
         spr_px = 2
         spr_w = 26*spr_px; spr_h = 28*spr_px   # 52 × 56
         sox = ix + cw//2 - spr_w//2
-        soy = iy + 32
+        soy = iy + 28
         mood = 'happy' if state in ('equipped','selected') else 'idle'
         blit_spr(surf, mood, spr_px, sox, soy)
+        # Animated sparkle at wing tip for selected/equipped items
+        # Right wing tip: cols 22-25 rows 10-13 → x≈sox+spr_w-3, y≈soy+10*spr_px+spr_px//2
+        if state in ('equipped','selected'):
+            wtx = sox + spr_w - 2
+            wty = soy + 10*spr_px + spr_px//2
+            wsz = max(1, int(0.8 + 0.8*abs(math.sin(self.frame*0.22))))
+            wc = clamp_color(col[0]+50, col[1]+50, col[2]+50)
+            _draw_cross_star(surf, wc, wtx, wty, wsz, int(160+95*abs(math.sin(self.frame*0.22))))
         if state != 'locked':
             # Clip accessories to card bounds so halo/crown stay inside
             old_clip = surf.get_clip()
@@ -2264,19 +2388,21 @@ class Wardrobe:
             surf.blit(lk_s,(ix+cw//2-lk_s.get_width()//2, iy+55))
 
         # ── Mannequin display stand base ──
-        stand_y = soy + spr_h + 2   # = iy+90
+        # Use 22*spr_px (visual content rows) not spr_h (28 rows incl. 6 empty) so
+        # the stand sits right under the feet instead of 12px below them.
+        stand_y = soy + 22*spr_px + 2   # = iy+74
         st_col = clamp_color(col[0]//2+90, col[1]//2+90, col[2]//2+90)
         st_dk  = clamp_color(st_col[0]-22, st_col[1]-22, st_col[2]-22)
         pygame.draw.rect(surf, st_col, (sox-2, stand_y,   spr_w+4, 4), border_radius=3)
         pygame.draw.rect(surf, st_dk,  (sox-2, stand_y,   spr_w+4, 4), 1, border_radius=3)
         pygame.draw.rect(surf, st_col, (ix+cw//2-10, stand_y+4, 20, 3), border_radius=2)
 
-        # ── Status badge ── (iy+96)
-        badge_y = stand_y + 6     # = iy+96, leaves room for F11 badge (17px → iy+113)
+        # ── Status badge ── (iy+80)
+        badge_y = stand_y + 6     # = iy+80, badge 17px tall → iy+97 < ch=110
         if state == 'equipped':
             bt = "ON \u2665"; bc2 = col; btc = (255,255,255)
         elif state == 'unlocked':
-            bt = "equip"; bc2 = (88,168,110); btc = (255,255,255)
+            bt = "equip"; bc2 = (108,65,195); btc = (255,255,255)
         else:
             bt = f"{it['cost']} fish"
             bc2 = (108,65,195) if state=='selected' else (140,122,182)
@@ -2319,16 +2445,23 @@ class Wardrobe:
             _draw_cross_star(surf,clamp_color(int(fv*255),int(fv*90),int(fv*195)),
                              sx2,sy2,max(1,int(fv*2)),int(fv*160))
 
-        # ── Header window (h=50 fits F18 title comfortably) ──
-        cy = draw_win(surf, 6, 6, SW-12, 50, "wardrobe.exe")
-        blit_c(surf, F18, "★  BOUTIQUE  ★", (55,25,105), SW//2-45, cy+2, aa=True)
-        blit_c(surf, F8, f"fish: {self.w.points}", (62,28,105), SW-52, cy+4, aa=True)
+        # ── Header window — h=62: content=32px, fits F18+fish without overflow ──
+        cy = draw_win(surf, 6, 6, SW-12, 62, "wardrobe.exe")
+        blit_c(surf, F18, "★  BOUTIQUE  ★", (55,25,105), SW//2-45, cy+3, aa=True)
+        # Fish count — icon + F14 number, right side
+        _draw_hud_fish(surf, SW-76, cy+14)
+        pts_s=F14.render(str(self.w.points),True,(55,22,100))
+        surf.blit(pts_s,(SW-58, cy+14-pts_s.get_height()//2))
+        # Gear icon — static decorative
+        gear_s=F11.render("⚙",True,(100,60,180))
+        surf.blit(gear_s,(SW-22, cy-1))
 
-        # ── Item grid: 5 cols × 88 wide × 114 tall → 2 rows of 5 = 10 items ──
-        cw=88; ch=114; gap=5
-        total_w = self.COLS*(cw+gap)-gap   # 5*93-5 = 460
-        gx0 = (SW-total_w)//2              # = 10
-        gy0 = 62                           # just below header
+        # ── Item grid: 5 cols × 88 wide × 110 tall → 2 rows ──
+        # Layout math: gy0=72, 2*(110+5)-5=225, grid bottom=297, +3+14btn=314 < 320 ✓
+        cw=88; ch=110; gap=5
+        total_w = self.COLS*(cw+gap)-gap
+        gx0 = (SW-total_w)//2
+        gy0 = 72
 
         for i, it in enumerate(ITEMS):
             row = i // self.COLS
@@ -2340,17 +2473,49 @@ class Wardrobe:
             elif iid in self.w.unlocked:   state='unlocked'
             elif i == self.sel:            state='selected'
             else:                          state='locked'
-            if i == self.sel and state != 'equipped': state = 'selected'
-            self._draw_item_card(surf, it, ix, iy, cw, ch, state)
+            self._draw_item_card(surf, it, ix, iy, cw, ch, state, focused=(i==self.sel))
+
+        # ── Settings button (sel=10) — bottom strip ──
+        # grid bottom = 72 + 2*(110+5)-5 = 297; btn at 300, h=16, bottom=316 ✓
+        grid_bottom = gy0 + 2*(ch+gap) - gap
+        btn_h = 16; btn_w = 160; btn_x = (SW-btn_w)//2
+        btn_y = grid_bottom + 3
+        s10 = (self.sel == 10)
+        draw_glass(surf, btn_x, btn_y, btn_w, btn_h, r=8,
+                   tint=(188,148,252) if s10 else (155,120,220),
+                   a=88 if s10 else 55)
+        if s10:
+            gp3 = int(180+55*math.sin(self.frame*0.15))
+            pygame.draw.rect(surf,(gp3,50,230),(btn_x,btn_y,btn_w,btn_h),2,border_radius=8)
+        else:
+            pygame.draw.rect(surf,(130,90,200),(btn_x,btn_y,btn_w,btn_h),1,border_radius=8)
+        blit_c(surf,F8,"settings",
+               (255,240,255) if s10 else (140,100,200),
+               SW//2, btn_y+4, aa=True)
 
         # ── Flash message ──
         if self.msg_t > 0 and self.msg:
             ms = F18.render(self.msg, True, (55,25,105))
             surf.blit(ms, (SW//2-ms.get_width()//2, SH//2-12))
 
-        # ── Footer ──
-        blit_c(surf, F8, "\u2190\u2192 move   ENTER equip/buy   ESC back",
-               (62,28,105), SW//2, SH-10, aa=True)
+        # ── Settings overlay ──
+        if self.settings:
+            pw2=240; ph2=172; px3=(SW-pw2)//2; py3=(SH-ph2)//2
+            cy3=draw_win(surf,px3,py3,pw2,ph2,"settings.exe")
+            opts=[
+                "motherload  +100 fish",
+                "change city",
+                "reset everything",
+                "close",
+            ]
+            row_h=34
+            for oi,otxt in enumerate(opts):
+                row_y=cy3+4+oi*row_h
+                if oi==self.settings_sel:
+                    pygame.draw.rect(surf,WIN_BAR,(px3+8,row_y-3,pw2-16,26),border_radius=5)
+                    blit_c(surf,F14,otxt,(255,255,255),SW//2,row_y)
+                else:
+                    blit_c(surf,F14,otxt,(90,35,145),SW//2,row_y)
 
 
 # ── CHILL SCREEN ──────────────────────────────────────────────────────────────
@@ -2459,24 +2624,42 @@ class Chill:
             _draw_cloud_puff(surf, ccx,            ccy,    cw,        (255,255,255), ca)
             _draw_cloud_puff(surf, ccx-cw//3,      ccy+8,  cw*2//3,   (255,255,255), ca-22)
             _draw_cloud_puff(surf, ccx+cw//3,      ccy+8,  cw*2//3,   (255,255,255), ca-22)
+        # Extra small clouds near Waddle (cx≈362, y≈200) — soft and dreamy
+        bob2=math.sin(self.frame*0.018+1.2)*3
+        _draw_cloud_puff(surf, 430, int(170+bob2),  52, (255,250,255), 155)
+        _draw_cloud_puff(surf, 404, int(178+bob2),  34, (255,250,255), 130)
+        _draw_cloud_puff(surf, 456, int(178+bob2),  34, (255,250,255), 130)
+        bob3=math.sin(self.frame*0.022+2.8)*2
+        _draw_cloud_puff(surf, 310, int(158+bob3),  44, (255,250,255), 140)
+        _draw_cloud_puff(surf, 286, int(165+bob3),  28, (255,250,255), 115)
+        _draw_cloud_puff(surf, 334, int(165+bob3),  28, (255,250,255), 115)
 
     def _waddle_cloud(self,surf):
         bob=math.sin(self.frame*0.024)*2.0
-        cx=362; by=198                          # right side of screen
-        # Cloud puffs
-        for ox2,oy2,cr2 in [(0,0,40),(-28,8,28),(28,8,28),(-14,12,24),(14,12,24)]:
-            pygame.draw.circle(surf,WHI,(cx+ox2,int(by+oy2+bob)),cr2)
-        # Sleeping Waddle (px=5)
-        blit_spr(surf,'sleepy',5,cx-26*5//2,int(by-28*5+26+bob))
-        # ZZZ floats to the right of the sleeping Waddle
+        spr_px=5; spr_w=26*spr_px; spr_h=28*spr_px   # 130 × 140
+        cx=362
+        sox=cx-spr_w//2                               # 297
+        soy=int(198-spr_h+36+bob)                     # ≈ 94+bob  (10px lower)
+        # Cloud platform — identical 3-puff style as pet screen
+        ccx=sox+spr_w//2+15                           # ≈ 377
+        ccy=soy+spr_h-12                              # ≈ 212+bob
+        _draw_cloud_puff(surf,ccx,          ccy,   130,(255,252,255),224)
+        _draw_cloud_puff(surf,ccx-spr_w//4, ccy+8,  82,(255,252,255),200)
+        _draw_cloud_puff(surf,ccx+spr_w//4, ccy+8,  82,(255,252,255),200)
+        shd=pygame.Surface((spr_w+20,7),pygame.SRCALPHA)
+        pygame.draw.ellipse(shd,(180,140,210,48),(0,0,spr_w+20,7))
+        surf.blit(shd,(sox-10,ccy+26))
+        # Sleeping Waddle
+        blit_spr(surf,'sleepy',spr_px,sox,soy)
+        # ZZZ
         za=0.40+0.40*math.sin(self.frame*0.04)
         zc=clamp_color(int(za*168),int(za*128),int(za*252))
-        surf.blit(F18.render("z",False,zc),(cx+56,int(by-72+bob)))
-        surf.blit(F14.render("z",False,zc),(cx+70,int(by-90+bob-5)))
+        surf.blit(F18.render("z",False,zc),(cx+56,soy-20))
+        surf.blit(F14.render("z",False,zc),(cx+70,soy-38))
 
     def _weather(self,surf):
         """Weather card using draw_win style — top-left of chill screen."""
-        wx2=8; wy=28; ww=240; wh=144
+        wx2=8; wy=10; ww=240; wh=162
         cy=draw_win(surf,wx2,wy,ww,wh,"weather.exe")   # cy = wy+27
         # Clip all content to the window interior so nothing overflows
         old_clip=surf.get_clip()
@@ -2496,34 +2679,44 @@ class Chill:
             raw_code=0
 
         # Icon — left side
-        draw_wx_icon(surf,raw_code,wx2+34,cy+32,size=38)
+        draw_wx_icon(surf,raw_code,wx2+34,cy+34,size=44)
 
         # Right side — constrained to card width
-        tx=wx2+80; max_tw=(wx2+ww)-tx-8
-        # Temperature — truncate if somehow huge
+        tx=wx2+82; max_tw=(wx2+ww)-tx-8
+        # Temperature
         temp_s=F32.render(f"{w2.temp}°",True,(70,20,100))
         surf.blit(temp_s,(tx, cy+2))
 
-        # Condition (auto-truncate)
+        # Condition — F11 (fits more comfortably), auto-truncate
         cond_text=w2.cond
         cs2=F11.render(cond_text,True,(95,38,135))
         while cs2.get_width()>max_tw and len(cond_text)>4:
             cond_text=cond_text[:-1]; cs2=F11.render(cond_text+"…",True,(95,38,135))
-        surf.blit(cs2,(tx, cy+36))
+        surf.blit(cs2,(tx, cy+38))
 
-        # Feels / humidity — two compact F8 lines instead of one wide F11 line
-        blit_l(surf,F8,f"feels {w2.feels}°",(108,52,148),tx,cy+52,aa=True)
-        blit_l(surf,F8,f"{w2.hum}% humidity · {CITY}",(120,68,158),tx,cy+64,aa=True)
+        # Feels + humidity + city — F11 for legibility
+        feels_s=f"feels {w2.feels}°"
+        while F11.size(feels_s)[0]>max_tw: feels_s=feels_s[:-1]
+        blit_l(surf,F11,feels_s,(108,52,148),tx,cy+54,aa=True)
+
+        hum_s=f"{w2.hum}% humidity"
+        while F11.size(hum_s)[0]>max_tw: hum_s=hum_s[:-1]
+        blit_l(surf,F11,hum_s,(120,68,158),tx,cy+69,aa=True)
+
+        city_s=CITY
+        while F8.size(city_s)[0]>max_tw: city_s=city_s[:-1]
+        blit_l(surf,F8,city_s,(148,90,185),tx,cy+85,aa=True)
 
         # Divider
-        pygame.draw.rect(surf,(220,140,210),(wx2+10,cy+76,ww-20,1))
+        pygame.draw.rect(surf,(220,140,210),(wx2+10,cy+97,ww-20,1))
 
-        # Hourly row — time + temp only (compact)
+        # Hourly row — 4 slots at 56px spacing, fits cleanly
         if w2.hourly:
-            hx=wx2+8
+            hx=wx2+10
             for h in w2.hourly[:4]:
-                blit_l(surf,F8, h['h'],(105,55,148),hx,cy+80,aa=True)
-                blit_l(surf,F11,f"{h['t']}°",(68,22,108),hx,cy+92,aa=True)
+                time_s=h['h']; temp_hs=f"{h['t']}°"
+                blit_l(surf,F8, time_s,(105,55,148),hx,cy+101,aa=True)
+                blit_l(surf,F11,temp_hs,(68,22,108),hx,cy+113,aa=True)
                 hx+=56
 
         surf.set_clip(old_clip)
@@ -2532,9 +2725,9 @@ class Chill:
         """5-day forecast below the weather card on the left column."""
         if not self.wx.ready or self.wx.err or not self.wx.daily: return
         cards=self.wx.daily[:5]
-        card_w=45; card_h=60; gap=3
-        # Left-aligned block below weather card (wy=28, wh=144 → bottom=172, gap 3 → dy=175)
-        dx=8; dy=175
+        card_w=46; card_h=68; gap=3
+        # Left-aligned block below weather card (wy=10, wh=162 → bottom=172, gap 4 → dy=176)
+        dx=8; dy=176
         for i,d in enumerate(cards):
             cx2=dx+i*(card_w+gap)
             try: dcode=int(d.get('_code',0))
@@ -2550,12 +2743,12 @@ class Chill:
             blit_c(surf,F8, d['lo'], (100,80,160),  cx2+card_w//2+9, dy+47, aa=True)
 
     def _terminal(self,surf):
-        # Left column, below 5-day forecast (forecast dy=175, card_h=60 → bottom=235, gap 3 → ty=238)
-        tx=8; ty=238; tw2=240; th=SH-ty-4
+        # Left column, below 5-day forecast (forecast dy=176, card_h=68 → bottom=244, gap 4 → ty=248)
+        tx=8; ty=248; tw2=240; th=SH-ty-4
         cy=draw_win(surf,tx,ty,tw2,th,"affirmations.exe")
         max_tw=tw2-18
-        # Show up to 6 lines
-        nlines=max(1,(th-28)//12)
+        # Always show exactly 3 affirmation lines
+        nlines=3
         shown=self.tlines[-nlines:]
         for i,line in enumerate(shown):
             is_last=(i==len(shown)-1)
@@ -2568,6 +2761,33 @@ class Chill:
         if shown and self.frame%24<12:
             tw3=F_SM.size(shown[-1])[0]
             pygame.draw.rect(surf,(108,58,162),(tx+8+min(tw3,max_tw),cy+len(shown)*12-11,6,9))
+
+    def _desktop_icons(self,surf):
+        """Y2K fake desktop icon row — bottom-right, below sleeping Waddle."""
+        icons=[
+            ("music.exe",  "♫", (210,140,255)),
+            ("camera.exe", "◎", (255,150,200)),
+            ("chat.exe",   "◉", (130,195,255)),
+            ("shop.exe",   "✦", (255,210,90)),
+        ]
+        iw=46; ih=46; gap=6
+        total_w=len(icons)*iw+(len(icons)-1)*gap
+        sx=254+(218-total_w)//2   # centre in right column
+        sy=244
+        for i,(name,sym,col) in enumerate(icons):
+            ix=sx+i*(iw+gap)
+            # Glass icon card
+            draw_glass(surf,ix,sy,iw,ih,r=8,tint=col,a=50)
+            pygame.draw.rect(surf,col,(ix,sy,iw,ih),1,border_radius=8)
+            # Symbol centred in card
+            sym_s=F14.render(sym,True,col)
+            surf.blit(sym_s,(ix+iw//2-sym_s.get_width()//2, sy+ih//2-sym_s.get_height()//2))
+            # App name
+            nm_s=F8.render(name,True,(190,155,235))
+            surf.blit(nm_s,(ix+iw//2-nm_s.get_width()//2, sy+ih+3))
+            # "coming soon" below name
+            cs_s=F8.render("coming soon",True,(170,130,215))
+            surf.blit(cs_s,(ix+iw//2-cs_s.get_width()//2, sy+ih+13))
 
     def draw(self,surf):
         self._sky(surf)
@@ -2629,12 +2849,13 @@ class PetScreen:
         self.frame+=1; self.w.tick(dt)
         if self.fb_t>0: self.fb_t-=dt
         self.sp_t+=dt
-        if self.sp_t>9000: self.sp_t=0; self.speech=self.w.speech()
-
         mood=self.w.mood
-        ph=self.frame*(0.28 if mood=='excited' else 0.18 if mood=='happy' else 0.07)
+        _sp_thresh=18000 if mood=='idle' else 7000 if mood in ('excited','happy') else 11000
+        if self.sp_t>_sp_thresh: self.sp_t=0; self.speech=self.w.speech()
+
+        ph=self.frame*(0.18 if mood in ('excited','happy') else 0.07)
         sv=math.sin(ph)
-        if   mood=='excited': self.squash=1.0+sv*0.055
+        if   mood=='excited': self.squash=1.0+sv*0.028
         elif mood=='happy':   self.squash=1.0+sv*0.030
         elif mood=='sad':     self.squash=1.0+sv*0.008
         else:                 self.squash=1.0+sv*0.016
@@ -2664,20 +2885,19 @@ class PetScreen:
     def _bob(self):
         mood=self.w.mood
         if mood=='happy':   return math.sin(self.frame*0.18)*4.5
-        if mood=='excited': return math.sin(self.frame*0.14)*2.8
+        if mood=='excited': return math.sin(self.frame*0.11)*1.5
         if mood=='sad':     return math.sin(self.frame*0.04)*1.2
         if mood=='sleepy':  return math.sin(self.frame*0.03)*1.5
         if mood=='hungry':  return math.sin(self.frame*0.22)*2.5
         return math.sin(self.frame*0.07)*3.0
 
     def _spr_pos(self):
-        """No title now — Waddle centred lower with more speech bubble space."""
+        """Waddle centred slightly right of screen midpoint to balance stats on left."""
         sw2=26*PX
-        cx=SW//2+25
+        cx=SW//2+14          # 14px right of true centre — gives stats 160px left space
         ox=cx-sw2//2
-        # More room: usable top=14, bottom=278. Centre sprite vertically.
-        # Push down 20 from centre so speech bubble has clear air at top
-        oy=int((14+278-28*PX)//2) + 20
+        # Vertical: sit on cloud — pushed down so feet land on cloud platform
+        oy=int((10+268-28*PX)//2) + 26
         return ox, oy+int(self._bob())
 
     def do_action(self,a):
@@ -2722,6 +2942,31 @@ class PetScreen:
         for hx,hy,hs in [(6,6,6),(SW-22,6,5),(6,SH-22,4),(SW-20,SH-24,5)]:
             _heart(surf,(255,190,220,70),hx,hy,hs)
 
+        # ── Background drifting clouds — upper sky ──────────────────────────────
+        _BG_CLOUDS=[
+            (20,  30,  104, 100, 0.08, (255,252,255)),
+            (210, 18,   78,  80, 0.13, (255,248,255)),
+            (390, 52,   88,  88, 0.10, (255,250,252)),
+            (100, 78,   64,  70, 0.17, (255,252,255)),
+            (310, 68,   96,  78, 0.09, (252,248,255)),
+            (460, 24,   72,  72, 0.15, (255,250,255)),
+        ]
+        for bx,by,cw2,ca,spd,ctint in _BG_CLOUDS:
+            cx2=int((bx+self.frame*spd)%(SW+cw2+60))-30
+            _draw_cloud_puff(surf,cx2,by,cw2,ctint,ca)
+
+        # ── Dreamy bottom clouds (triple-puff clusters, like chill screen) ───────
+        for _bcx_base,_bcy,_bcw,_bca,_bspd in [
+            ( 40, 262, 110, 165, 0.06),
+            (200, 252, 130, 180, 0.04),
+            (390, 268, 100, 155, 0.07),
+            (560, 256, 118, 170, 0.05),
+        ]:
+            _bcx=int((_bcx_base+self.frame*_bspd)%(SW+180))-60
+            _draw_cloud_puff(surf,_bcx,          _bcy,   _bcw,       (255,252,255),_bca)
+            _draw_cloud_puff(surf,_bcx-_bcw//3,  _bcy+10,_bcw*2//3, (255,250,255),_bca-25)
+            _draw_cloud_puff(surf,_bcx+_bcw//3,  _bcy+10,_bcw*2//3, (255,250,255),_bca-25)
+
         # ── Sparkle particles ──
         for p in self.sparks:
             sz=max(2,int(p['sz']*2.8))
@@ -2748,11 +2993,11 @@ class PetScreen:
 
         # ── Kawaii cloud platform behind the pet ──
         spr_w=26*PX; spr_h=28*PX
-        ccx=ox+spr_w//2; ccy=oy+spr_h-12
+        ccx=ox+spr_w//2+12; ccy=oy+spr_h-28
         # Three overlapping puffs → proper fluffy cloud, no egg shapes
-        _draw_cloud_puff(surf, ccx+15,        ccy,   110, (255,252,255), 224)
-        _draw_cloud_puff(surf, ccx-spr_w//4+15, ccy+8, 68, (255,252,255), 200)
-        _draw_cloud_puff(surf, ccx+spr_w//4+15, ccy+8, 68, (255,252,255), 200)
+        _draw_cloud_puff(surf, ccx,            ccy,   140, (255,252,255), 224)
+        _draw_cloud_puff(surf, ccx-spr_w//4,   ccy+8,  90, (255,252,255), 200)
+        _draw_cloud_puff(surf, ccx+spr_w//4,   ccy+8,  90, (255,252,255), 200)
         # Soft shadow under cloud
         shd=pygame.Surface((spr_w+20,7),pygame.SRCALPHA)
         pygame.draw.ellipse(shd,(180,140,210,48),(0,0,spr_w+20,7))
@@ -2772,7 +3017,9 @@ class PetScreen:
             surf.blit(F14.render("z",False,zc),(ox+26*PX,oy+4))
             surf.blit(F11.render("z",False,zc),(ox+26*PX+14,oy-10))
 
-        self._speech(surf,ox+26*PX//2,oy)
+        # ── Speech bubble — drawn after accessories so hats never cover it ──
+        self._speech(surf,ox,oy)
+
         self._stats(surf)
         self._points(surf)
         self._menu(surf)
@@ -2782,10 +3029,10 @@ class PetScreen:
             fs=F18.render(self.fb,False,PUR)
             surf.blit(fs,(SW//2-fs.get_width()//2,max(8,oy2-52)))
 
-    def _speech(self,surf,cx,sprite_top):
-        """Mood-coloured speech bubble with star decorations."""
+    def _speech(self,surf,ox,oy):
+        """Mood speech bubble — drawn after accessories so hats never block it.
+        Floats above the sprite head; full screen width so text is never cut off."""
         mood=self.w.mood
-        # Bubble colour varies by mood
         bub_cols={
             'happy'  :(255,215,240), 'excited':(255,200,245),
             'sad'    :(215,225,255), 'sleepy' :(230,220,255),
@@ -2796,46 +3043,52 @@ class PetScreen:
             'sad'    :(175,195,255), 'sleepy' :(200,175,255),
             'hungry' :(255,165,155), 'idle'   :(255,192,225),
         }
-        txt_col=TXT_DK
         bc=bub_cols.get(mood,(255,215,240))
         bdc=bdr_cols.get(mood,(255,192,225))
 
-        fs=F11.render(self.speech,False,txt_col)
+        # Right-side bubble: starts right of sprite face centre
+        spr_cx=ox+13*PX
+        bx_start=spr_cx+10
+        text=self.speech
+        fs=F11.render(text,False,TXT_DK)
+        max_tw=SW-bx_start-8-32          # text area available to the right
+        while fs.get_width()>max_tw and len(text)>4:
+            text=text[:-1]; fs=F11.render(text+'…',False,TXT_DK)
         tw=fs.get_width()+32; th=30
-        by_bottom=sprite_top-16; by=by_bottom-th
-        by=max(28,by)
-        bx=max(8,int(cx)-tw//2); bx=min(bx,SW-tw-8)
 
-        # Shadow
+        bx=min(bx_start, SW-tw-8)        # clamp if bubble too wide
+        by=max(8, oy-th-18)
+
+        # Soft shadow
         sh=pygame.Surface((tw+2,th+2),pygame.SRCALPHA)
-        pygame.draw.rect(sh,(0,0,0,28),(0,0,tw+2,th+2),border_radius=11)
+        pygame.draw.rect(sh,(0,0,0,14),(0,0,tw+2,th+2),border_radius=11)
         surf.blit(sh,(bx+2,by+3))
 
-        # Bubble fill
-        draw_glass(surf,bx,by,tw,th,r=11,tint=bc,a=80)
-        pygame.draw.rect(surf,bdc,(bx,by,tw,th),2,border_radius=11)
+        # Bubble fill — a=115 keeps it readable when crown tips peek behind it
+        draw_glass(surf,bx,by,tw,th,r=11,tint=bc,a=115)
+        pygame.draw.rect(surf,bdc,(bx,by,tw,th),1,border_radius=11)
 
         # Text
         surf.blit(fs,(bx+16,by+th//2-fs.get_height()//2))
 
-        # Tail
-        tcx=max(bx+14,min(int(cx),bx+tw-14))
-        pygame.draw.polygon(surf,bc,[(tcx-6,by+th),(tcx+6,by+th),(tcx,by+th+13)])
-        pygame.draw.polygon(surf,bdc,[(tcx-6,by+th),(tcx+6,by+th),(tcx,by+th+13)],1)
+        # Left-pointing tail toward sprite face
+        ty_mid=by+th//2
+        pygame.draw.polygon(surf,bc, [(bx,ty_mid-7),(bx,ty_mid+7),(bx-12,ty_mid)])
+        pygame.draw.polygon(surf,bdc,[(bx,ty_mid-7),(bx,ty_mid+7),(bx-12,ty_mid)],1)
 
-        # Star decorations on bubble — mood-dependent
+        # Star decorations
         if mood in ('happy','excited'):
             star_c=(255,180,220)
             _draw_cross_star(surf,star_c,bx+8,by+6,1,180)
             _draw_cross_star(surf,star_c,bx+tw-9,by+7,1,150)
 
     def _stats(self,surf):
-        """Stat bars with numeric %, warning pulses, and compact layout."""
-        sx=8; sy=52; bw=148; bh=18; gap=38
+        """Stat bars — 3 bars evenly spaced in left column."""
+        sx=8; sy=58; bw=144; bh=20; gap=30
         stats=[
             ('HUNGER',   self.w.hunger,    (255,108,108), self.w.hunger>70),
-            ('HAPPINESS',self.w.happiness, (188,138,255), self.w.happiness<25),
-            ('ENERGY',   self.w.energy,    (108,208,168), self.w.energy<20),
+            ('HAPPINESS',self.w.happiness, (255,158,64),  self.w.happiness<25),
+            ('ENERGY',   self.w.energy,    (82,210,148),  self.w.energy<20),
         ]
         for i,(label,val,col,warn) in enumerate(stats):
             y=sy+i*(bh+gap)
@@ -2877,29 +3130,32 @@ class PetScreen:
             pygame.draw.rect(surf,lite,(sx,y,bw,bh),1,border_radius=5)
 
     def _points(self,surf):
-        pw=118; px2=SW-pw-10; py=58
-        draw_glass(surf,px2,py,pw,60,r=11,tint=(188,148,252))
-        pygame.draw.rect(surf,(120,70,200),(px2,py,pw,60),2,border_radius=11)
-        blit_c(surf,F8,"POINTS",(62,28,105),px2+pw//2,py+8,aa=True)
-        blit_c(surf,F24,f"{self.w.points:05d}",(62,28,105),px2+pw//2,py+26)
+        # Fish icon + number — bare, no box, top-right corner
+        num_s=F18.render(f"{self.w.points:04d}",True,(55,22,100))
+        py=10; rx=SW-num_s.get_width()-32
+        _draw_hud_fish(surf,rx+6,py+num_s.get_height()//2)
+        surf.blit(num_s,(rx+18,py))
 
     def _menu(self,surf):
-        n=len(self.MENU)
-        gap=5
-        total_usable=SW-16
-        iw=total_usable//n - gap
-        bh=44
+        # Single row of 6 buttons with group dividers
+        n=len(self.MENU); gap=5; bh=46
+        total_usable=SW-14
+        iw=(total_usable - (n-1)*gap)//n
         total=n*(iw+gap)-gap
-        sx=(SW-total)//2; sy=SH-54
+        sx=(SW-total)//2; sy=SH-bh-5
         for i,item in enumerate(self.MENU):
             rx=sx+i*(iw+gap); is_sel=(i==self.sel)
             tint=(188,148,252) if is_sel else (240,218,255)
-            draw_glass(surf,rx,sy,iw,bh,r=8,tint=tint,a=70)
-            # Always outline — thicker + more vivid when selected
+            draw_glass(surf,rx,sy,iw,bh,r=10,tint=tint,a=72)
             bdr=(88,30,160) if is_sel else (140,90,200)
-            bdr_w=3 if is_sel else 2
-            pygame.draw.rect(surf,bdr,(rx,sy,iw,bh),bdr_w,border_radius=8)
-            lbl=F11.render(item,True,(48,18,95) if is_sel else (62,28,105))
+            pygame.draw.rect(surf,bdr,(rx,sy,iw,bh),3 if is_sel else 2,border_radius=10)
+            # Selected pulse glow
+            if is_sel:
+                gv=int(30+18*math.sin(self.frame*0.14))
+                gs=pygame.Surface((iw-4,bh-4),pygame.SRCALPHA)
+                pygame.draw.rect(gs,(140,80,230,gv),(0,0,iw-4,bh-4),border_radius=8)
+                surf.blit(gs,(rx+2,sy+2))
+            lbl=F11.render(item,True,(255,255,255) if is_sel else (62,28,105))
             surf.blit(lbl,(rx+iw//2-lbl.get_width()//2,sy+bh//2-lbl.get_height()//2))
 
 
@@ -2910,12 +3166,116 @@ BOOT_MSGS = [
     "calibrating happiness sensors...",
     "mounting /dev/penguin...",
     "syncing code buffer...   OK",
-    "patching kawaii module v3.2...",
+    "patching cute module v3.2...",
     "connecting to moon...  OK",
     "loading pixel font...  OK",
-    "all systems nominal  ♥",
+    "all systems normal  ♥",
     "welcome back  ✦",
 ]
+
+# ── LOCATION SETUP ────────────────────────────────────────────────────────────
+class LocationSetup:
+    """Shown on first launch when no location is saved.
+    User types a city name → geocoded via Open-Meteo → saved to waddle_save.json.
+    """
+    def __init__(self):
+        self.text     = ''
+        self.state    = 'input'   # 'input' | 'searching' | 'confirm' | 'error'
+        self.result   = None      # {'name', 'lat', 'lon'}
+        self.err_msg  = ''
+        self.frame    = 0
+        self._done    = False
+        self._res_buf = None
+        self._err_buf = None
+
+    def handle_event(self, ev):
+        if ev.type != pygame.KEYDOWN: return None
+        if self.state == 'input':
+            if ev.key == pygame.K_RETURN and self.text.strip():
+                self.state = 'searching'
+                self._done = False; self._res_buf = None; self._err_buf = None
+                threading.Thread(target=self._geocode, daemon=True).start()
+            elif ev.key == pygame.K_BACKSPACE:
+                self.text = self.text[:-1]
+            elif ev.unicode and len(self.text) < 36:
+                self.text += ev.unicode
+        elif self.state == 'confirm':
+            if ev.key == pygame.K_RETURN:   return 'done'
+            if ev.key == pygame.K_ESCAPE:
+                self.state='input'; self.text=''; self.result=None
+        elif self.state == 'error':
+            self.state='input'
+        return None
+
+    def _geocode(self):
+        try:
+            enc = urllib.parse.quote(self.text.strip())
+            url = (f"https://geocoding-api.open-meteo.com/v1/search"
+                   f"?name={enc}&count=1&language=en&format=json")
+            req = urllib.request.Request(url, headers={"User-Agent":"WaddlePet/5"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                import json as _j; d = _j.loads(r.read())
+            if d.get('results'):
+                res = d['results'][0]
+                admin1 = res.get('admin1','')
+                country = res.get('country_code','').upper()
+                display = f"{res['name']}, {admin1}" if admin1 else f"{res['name']}, {country}"
+                self._res_buf = {'name':display,'lat':res['latitude'],'lon':res['longitude']}
+            else:
+                self._err_buf = "city not found — try again"
+        except Exception:
+            self._err_buf = "network error — try again"
+        self._done = True
+
+    def update(self, dt):
+        self.frame += 1
+        if self.state == 'searching' and self._done:
+            self._done = False
+            if self._res_buf:
+                self.result = self._res_buf; self._res_buf = None
+                self.state = 'confirm'
+            else:
+                self.err_msg = self._err_buf or "error"; self._err_buf = None
+                self.state = 'error'
+
+    def draw(self, surf):
+        surf.fill((255, 228, 245))
+        # Decorative drifting dots
+        for i in range(5):
+            xd = (self.frame*0.7 + i*97)%SW
+            pygame.draw.circle(surf,(255,190,230),
+                               (int(xd),int(40+math.sin(self.frame*0.04+i)*18)),3)
+        # Title
+        blit_c(surf, F24, "waddle ♡",    (210, 80, 185), SW//2, 28, aa=True)
+        blit_c(surf, F14, "where do you live?", (155,62,168), SW//2, 62, aa=True)
+        blit_c(surf, F8, "so we can show you live weather on the chill screen ♡", (180,110,200), SW//2, 82, aa=True)
+        # Input box
+        bx=SW//2-148; bw=296; by3=100; bh=34
+        pygame.draw.rect(surf,(255,255,255),(bx,by3,bw,bh),border_radius=9)
+        pygame.draw.rect(surf,(215,110,210),(bx,by3,bw,bh),2,border_radius=9)
+        cur_char='|' if self.frame%24<12 and self.state=='input' else ''
+        ts=F14.render((self.text or '')+cur_char, True, (72,28,115))
+        surf.blit(ts,(bx+10,by3+8))
+        # Status line
+        if self.state=='input':
+            blit_c(surf,F8,"type your city and press ENTER",(165,85,185),SW//2,146,aa=True)
+        elif self.state=='searching':
+            dots='.'*(1+(self.frame//8)%3)
+            blit_c(surf,F14,f"searching{dots}",(160,80,180),SW//2,152,aa=True)
+        elif self.state=='confirm' and self.result:
+            name=self.result['name']
+            if F14.size(name)[0]>SW-40:
+                name=name[:26]+'…'
+            blit_c(surf,F14,name,(72,28,115),SW//2,152,aa=True)
+            blit_c(surf,F11,"ENTER to confirm  ·  ESC to retry",(145,72,175),SW//2,176,aa=True)
+        elif self.state=='error':
+            blit_c(surf,F14,self.err_msg,(200,50,80),SW//2,152,aa=True)
+            blit_c(surf,F8,"press any key to try again",(165,85,185),SW//2,176,aa=True)
+        # Hearts
+        for hx2,hy2 in [(52,268),(428,268),(44,198),(436,198)]:
+            _draw_pixel_heart(surf,(255,150,200),hx2,hy2,px=3,alpha=200)
+        blit_c(surf,F8,"you can change this in waddle.py anytime",(190,130,200),SW//2,306,aa=True)
+
 
 class BootScreen:
     DURATION = 3800   # ms total boot time
@@ -2946,71 +3306,33 @@ class BootScreen:
             self.done = True
 
     def draw(self, surf):
-        # ── Y2K kawaii boot: use vibe photo if available, else pink gradient ──
-        if IMG_VIBE:
-            surf.blit(IMG_VIBE, (0, 0))
-            ov = pygame.Surface((SW, SH), pygame.SRCALPHA)
-            ov.fill((255, 200, 230, 80))
-            surf.blit(ov, (0, 0))
+        # ── Static loading screen image ──────────────────────────────────────────
+        if IMG_BOOT:
+            surf.blit(IMG_BOOT, (0, 0))
         else:
-            # Pink-lavender gradient (matches vibe.webp background feel)
-            for y in range(SH):
-                t = y/SH
-                r = clamp_color(int(210+t*10), int(175+t*5), int(230+t*5))
-                pygame.draw.line(surf, r, (0, y), (SW, y))
-        grid_bg(surf,(230,80,190),22,32)
+            surf.fill((158, 165, 210))
 
-        # Sparkling stars / cross sparkles
-        for i in range(28):
-            sx=(i*137+self.frame//3)%SW
-            sy=(i*89)%(SH-40)+10
-            fv=0.3+0.5*math.sin(self.frame*0.06+i)
-            col=clamp_color(int(fv*255),int(fv*128),int(fv*220))
-            _draw_cross_star(surf,col,sx,sy,max(1,int(fv*2)),int(fv*200))
+        # ── Animated loading bar — centred, just below the folder row ────────────
+        prog = min(1.0, self.elapsed / self.DURATION)
+        bpw=240; bph=12; bpx=(SW-bpw)//2; bpy=271  # centred, below folders ≈y271
 
-        # Layout: sprite at top, title below, progress bar, then log at bottom
-        spr_px=5; oy=8
-        ox=SW//2-26*spr_px//2
-        mood='happy' if self.elapsed>self.DURATION*0.75 else 'idle'
-        wing_up=mood=='happy' and math.sin(self.frame*0.18)>0
-        blit_spr(surf,mood,spr_px,ox,oy,wing_up)
+        # Subtle dark track behind bar (blends with gradient bg)
+        pygame.draw.rect(surf,(40,30,70,180),(bpx-4,bpy-4,bpw+8,bph+8))
 
-        # Title block — fixed position below sprite
-        ty=28*spr_px+oy+8
-        blit_c(surf,F24,"WADDLE.EXE",(200,60,180),SW//2,ty)
-        pulse=0.6+0.35*math.sin(self.frame*0.08)
-        sc=clamp_color(int(pulse*190),int(pulse*80),int(pulse*210))
-        blit_c(surf,F8,"cyberdeck pet OS  v6",sc,SW//2,ty+28)
-
-        # Progress bar — styled like vibe.webp progress window
-        prog=min(1.0, self.elapsed/self.DURATION)
-        bw=300; bh=12; bx=SW//2-bw//2; by=ty+44
-        draw_glass(surf,bx-4,by-4,bw+8,bh+8,r=8,tint=(255,150,210),a=55)
-        pygame.draw.rect(surf,(255,220,240),(bx,by,bw,bh),border_radius=6)
-        fw=max(0,int(prog*bw))
-        if fw>2:
-            for px2 in range(fw):
-                t2=px2/bw
-                pc=clamp_color(int(255-t2*30),int(80+t2*50),int(200-t2*40))
-                pygame.draw.line(surf,pc,(bx+px2,by),(bx+px2,by+bh))
-            shine=pygame.Surface((fw,bh//2),pygame.SRCALPHA)
-            shine.fill((255,255,255,60)); surf.blit(shine,(bx,by))
-            pygame.draw.rect(surf,(255,160,220),(bx,by,fw,bh),1,border_radius=6)
-        pygame.draw.rect(surf,(220,80,190),(bx,by,bw,bh),2,border_radius=6)
-        pct=F8.render(f"{int(prog*100)}%",False,(180,50,160))
-        surf.blit(pct,(SW//2-pct.get_width()//2,by+bh+3))
-
-        # Boot log — anchored to bottom, scrolls upward from fixed baseline
-        log_base=SH-8; max_lines=5
-        shown=self.lines[-max_lines:]
-        for i,ln in enumerate(shown):
-            ly=log_base-(len(shown)-i)*13
-            is_last=(i==len(shown)-1)
-            col=(185,30,155) if is_last else (160,60,140)
-            blit_l(surf,F8,"> "+ln,col,SW//2-148,ly)
-        if shown and self.frame%24<12:
-            tw3=F8.size("> "+shown[-1])[0]
-            pygame.draw.rect(surf,(220,80,200),(SW//2-148+tw3,log_base-13,7,10))
+        # Border
+        pygame.draw.rect(surf,(38,35,72),(bpx-2,bpy-2,bpw+4,bph+4))
+        # Empty (white)
+        pygame.draw.rect(surf,(245,245,252),(bpx,bpy,bpw,bph))
+        # Pink fill
+        _fw=max(0,int(prog*bpw))
+        if _fw>0:
+            pygame.draw.rect(surf,(215,152,172),(bpx,bpy,_fw,bph))
+            # Sheen
+            _sh=pygame.Surface((_fw,bph//2),pygame.SRCALPHA)
+            _sh.fill((255,255,255,55)); surf.blit(_sh,(bpx,bpy))
+        # Percentage label centred below bar
+        _pct=F8.render(f"{int(prog*100)}%",True,(80,70,130))
+        surf.blit(_pct,(bpx+bpw//2-_pct.get_width()//2, bpy+bph+3))
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
@@ -3023,6 +3345,30 @@ def main():
     Mini-game screens (dodge, code) are re-instantiated fresh every time the
     player enters them — this resets score/lives without touching Waddle's stats.
     """
+    # ── Location setup — run once if no location saved ────────────────────────
+    sv=load_save()
+    if 'lat' in sv and 'lon' in sv and 'city' in sv:
+        _apply_location(sv['lat'], sv['lon'], sv['city'])
+    else:
+        loc_setup=LocationSetup()
+        loc_done=False
+        while not loc_done:
+            dt2=clock.tick(FPS)
+            for ev in pygame.event.get():
+                if ev.type==pygame.QUIT: pygame.quit(); sys.exit()
+                r=loc_setup.handle_event(ev)
+                if r=='done':
+                    res=loc_setup.result
+                    _apply_location(res['lat'], res['lon'], res['name'])
+                    sv2=load_save()
+                    sv2.update({'lat':res['lat'],'lon':res['lon'],'city':res['name']})
+                    write_save(sv2)
+                    loc_done=True
+            if not loc_done:
+                loc_setup.update(dt2)
+                loc_setup.draw(screen)
+                pygame.display.flip()
+
     w=Waddle(); pet=PetScreen(w); chill=Chill(w); wardrobe=Wardrobe(w)
     cur='boot'; boot=BootScreen(); dodge=None; code_game=None
 
@@ -3061,6 +3407,26 @@ def main():
             elif cur=='wardrobe':
                 r2=wardrobe.handle_event(ev)
                 if r2=='back': cur='pet'; Sounds.menu_beep()
+                elif r2=='restart':
+                    pygame.quit()
+                    os.execv(sys.executable, [sys.executable]+sys.argv)
+                elif r2=='change_city':
+                    loc2=LocationSetup(); ld2=False
+                    while not ld2:
+                        dt3=clock.tick(FPS)
+                        for ev3 in pygame.event.get():
+                            if ev3.type==pygame.QUIT: pygame.quit(); sys.exit()
+                            r3=loc2.handle_event(ev3)
+                            if r3=='done':
+                                res3=loc2.result
+                                _apply_location(res3['lat'],res3['lon'],res3['name'])
+                                sv3=load_save()
+                                sv3.update({'lat':res3['lat'],'lon':res3['lon'],'city':res3['name']})
+                                write_save(sv3)
+                                ld2=True
+                        if not ld2:
+                            loc2.update(dt3); loc2.draw(screen); pygame.display.flip()
+                    chill=Chill(w)  # refresh weather data for new city
 
         if cur=='boot':
             boot.update(dt)
