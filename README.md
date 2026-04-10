@@ -1,11 +1,11 @@
-# Waddle ♡ ✮ ⋆ ˚｡𖦹 ⋆°°✩
+# ♡ Waddle ♡
 
-> a tiny virtual pet with minigames ˚₊· ͟͟͞͞➳❥
+> a tiny virtual pet with minigames!
 
 ![Python](https://img.shields.io/badge/Python-3.11-ffb6c1?style=flat-square)
 ![pygame](https://img.shields.io/badge/pygame-2.6-c9b1ff?style=flat-square)
 
-## what is waddle? ˘ᵕ˘ ✩₊˚.⋆☾⋆⁺₊✧
+## what is waddle? ˘ᵕ˘ 
 
 Waddle is a virtual penguin with a cute cyber aesthetic. Keep her happy and play mini-games to earn fish. You can also dress her up with items from the boutique wardrobe. The eventual goal for Waddle is some kind of handheld Raspberry Pi contraption with buttons, a screen, and a joystick ♡ This is a fun personal project as I enjoy soldering and messing with things
 
@@ -33,7 +33,7 @@ Waddle is a virtual penguin with a cute cyber aesthetic. Keep her happy and play
 
 ---
 
-## get started
+## get started ✩₊˚.⋆
 
 ```bash
 pip install pygame numpy
@@ -48,7 +48,7 @@ When you first open Waddle, you'll be asked your location for the weather API. T
 
 ---
 
-## controls
+## controls ಥ‿ಥ
 
 | key | does |
 |-----|------|
@@ -60,7 +60,7 @@ When you first open Waddle, you'll be asked your location for the weather API. T
 
 ---
 
-## credits ಥ‿ಥ
+## credits
 
 - pixel font: **Pixel7** by Sizenko Alexander (freeware)
 - weather data: [Open-Meteo](https://open-meteo.com/) (free, no API key)
