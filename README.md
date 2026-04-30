@@ -5,13 +5,13 @@
 ![Python](https://img.shields.io/badge/Python-3.11-ffb6c1?style=flat-square)
 ![pygame](https://img.shields.io/badge/pygame-2.6-c9b1ff?style=flat-square)
 
-## what is waddle? ˘ᵕ˘ 
+## what is waddle?  
 
 Waddle is a virtual penguin with a cute cyber aesthetic. Keep her happy and play mini-games to earn fish. You can also dress her up with items from the boutique wardrobe. The eventual goal for Waddle is some kind of handheld Raspberry Pi contraption with buttons, a screen, and a joystick ♡ This is a fun personal project as I enjoy soldering and messing with things
 
 ---
 
-## screens ★₊˚⊹✧˖°.
+## screens ★₊˚⊹
 
 <table>
 <tr>
@@ -22,7 +22,7 @@ Waddle is a virtual penguin with a cute cyber aesthetic. Keep her happy and play
 
 ---
 
-## games ☾⋆⁺₊✧˖°. 
+## games ☾⋆⁺₊✧˖
 
 <table>
 <tr>
@@ -48,7 +48,7 @@ When you first open Waddle, you'll be asked your location for the weather API. T
 
 ---
 
-## controls ಥ‿ಥ
+## controls 
 
 | key | does |
 |-----|------|
